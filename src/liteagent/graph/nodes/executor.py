@@ -1,0 +1,84 @@
+from typing import Dict, Any, List
+import json
+import inspect
+from ...core.state import AgentState
+from ...tools.registry import registry
+
+async def executor_node(state: AgentState) -> Dict[str, Any]:
+    """Executes tool calls found in the messages with type conversion."""
+    last_message = state["messages"][-1]
+    tool_calls = last_message.get("tool_calls", [])
+    
+    outputs = []
+    errors = []
+    
+    for call in tool_calls:
+        function_info = call.get("function", call)
+        name = function_info["name"]
+        args = function_info.get("arguments", {})
+        
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                errors.append(f"Failed to parse arguments for {name}: {args}")
+                continue
+
+        if name in registry.tools:
+            try:
+                func = registry.tools[name]
+                sig = inspect.signature(func)
+                
+                # Perform automatic type conversion based on function signature
+                typed_args = {}
+                for param_name, param in sig.parameters.items():
+                    if param_name in args:
+                        val = args[param_name]
+                        # Handle potential Optional or Union types in annotation
+                        origin = getattr(param.annotation, "__origin__", None)
+                        args_list = getattr(param.annotation, "__args__", [])
+                        
+                        expected_types = [param.annotation]
+                        if origin is not None:
+                            expected_types = list(args_list)
+
+                        # Try to cast to the first sensible type in the annotation
+                        try:
+                            if int in expected_types and not isinstance(val, int):
+                                typed_args[param_name] = int(val)
+                            elif bool in expected_types and not isinstance(val, bool):
+                                if isinstance(val, str):
+                                    typed_args[param_name] = val.lower() == "true"
+                                else:
+                                    typed_args[param_name] = bool(val)
+                            else:
+                                typed_args[param_name] = val
+                        except (ValueError, TypeError):
+                            typed_args[param_name] = val
+                    elif param.default is not inspect.Parameter.empty:
+                        pass
+
+                # Specific fix for get_workspace_info pattern list
+                if name == "get_workspace_info" and "ignore_patterns" in typed_args:
+                    val = typed_args["ignore_patterns"]
+                    if isinstance(val, str):
+                        typed_args["ignore_patterns"] = [p.strip() for p in val.replace("[", "").replace("]", "").replace("\"", "").split(",")]
+
+                result = func(**typed_args)
+                outputs.append({"tool_call_id": call.get("id"), "output": result})
+            except Exception as e:
+                import traceback
+                errors.append(f"Error executing {name}: {str(e)}\n{traceback.format_exc()}")
+        else:
+            errors.append(f"Tool {name} not found.")
+
+    tool_messages = [
+        {"role": "tool", "content": str(out["output"]), "tool_call_id": out.get("tool_call_id")}
+        for out in outputs
+    ]
+    
+    return {
+        "messages": tool_messages,
+        "tool_outputs": outputs,
+        "errors": errors
+    }
