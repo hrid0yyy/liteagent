@@ -11,6 +11,10 @@ dependencies = [
     "httpx",
     "rich",
     "python-dotenv",
+    "prompt_toolkit",
+    "tenacity",
+    "fastapi",
+    "uvicorn",
 ]
 requires-python = ">=3.10"
 

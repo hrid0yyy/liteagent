@@ -4,11 +4,16 @@ import warnings
 from typing import Optional
 from rich.prompt import Prompt
 from rich.panel import Panel
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
 from ..core.config import settings
+from ..core.state import app_state
 from ..providers.ollama import OllamaProvider
 from ..providers.nvidia_nim import NvidiaNimProvider
+from ..providers.openrouter import OpenRouterProvider
 from ..graph.builder import create_graph
 from .formatter import format_message, console
+from .server import start_server
 
 # Suppress annoying dependency warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -57,7 +62,6 @@ async def _run_chat(provider_name: str, model: Optional[str]):
     provider = _get_provider(provider_name, model)
     graph = create_graph(provider)
     
-    # We keep the message history persistent in this 'state' variable
     state = {
         "messages": [],
         "plan": "",
@@ -68,16 +72,37 @@ async def _run_chat(provider_name: str, model: Optional[str]):
 
     console.print(Panel("Interactive Chat Started. Type 'exit' or 'quit' to end.", title="LiteAgent Chat", expand=False))
 
+    # Start the web tool inspector in the background
+    asyncio.create_task(start_server())
+    console.print("[bold cyan]🌐 Tool Inspector running at http://localhost:8000[/bold cyan]")
+
+    kb = KeyBindings()
+
+    @kb.add("s-tab")
+    def _(event):
+        app_state.auto_mode = not app_state.auto_mode
+        # Refresh the prompt to update the toolbar
+        event.app.invalidate()
+
+    def get_toolbar():
+        mode = "AUTO" if app_state.auto_mode else "MANUAL"
+        color = "green" if app_state.auto_mode else "yellow"
+        return f" Mode: {mode} (Shift+Tab to toggle) | exit to quit"
+
+    session = PromptSession(key_bindings=kb, bottom_toolbar=get_toolbar)
+
     while True:
-        user_input = Prompt.ask("\n[bold blue]You[/bold blue]")
+        try:
+            user_input = await session.prompt_async("\nYou > ")
+        except EOFError:
+            break
+            
         if user_input.lower() in ["exit", "quit"]:
             break
         
-        # Add the new message to state.
         state["messages"].append({"role": "user", "content": user_input})
         state["is_complete"] = False
         
-        # Run the graph and update the persistent state
         state = await _execute_graph(graph, state, verbose=False)
 
 def _get_provider(provider_name: str, model: Optional[str]):
@@ -85,6 +110,8 @@ def _get_provider(provider_name: str, model: Optional[str]):
         return OllamaProvider(model=model)
     elif provider_name == "nvidia":
         return NvidiaNimProvider(model=model)
+    elif provider_name == "openrouter":
+        return OpenRouterProvider(model=model)
     else:
         console.print(f"[red]Error:[/red] Unsupported provider: {provider_name}")
         raise typer.Exit(1)

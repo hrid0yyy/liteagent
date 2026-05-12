@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     
     # LLM Providers
     nvidia_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
     
     # Default Provider

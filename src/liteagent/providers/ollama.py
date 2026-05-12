@@ -9,7 +9,7 @@ class OllamaProvider(BaseProvider):
         self.base_url = base_url or settings.ollama_base_url
 
     async def generate(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             payload = {
                 "model": self.model,
                 "messages": messages,

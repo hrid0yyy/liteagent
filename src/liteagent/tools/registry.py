@@ -48,10 +48,13 @@ class ToolRegistry:
 registry = ToolRegistry()
 
 # Registering tools
-from .workspace import get_workspace_info
+from .workspace import get_workspace_info, search_in_files
 from .file_ops import read_file, write_file, modify_file
+from .shell import run_shell_command
 
 registry.register(get_workspace_info)
+registry.register(search_in_files)
 registry.register(read_file)
 registry.register(write_file)
 registry.register(modify_file)
+registry.register(run_shell_command)

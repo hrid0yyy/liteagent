@@ -1,6 +1,12 @@
 from typing import TypedDict, Annotated, List, Union
 from operator import add
 
+class AppState:
+    def __init__(self):
+        self.auto_mode = False
+
+app_state = AppState()
+
 class AgentState(TypedDict):
     # The history of messages in the conversation
     messages: Annotated[List[dict], add]

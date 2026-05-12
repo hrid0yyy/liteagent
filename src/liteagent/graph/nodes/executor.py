@@ -1,11 +1,14 @@
 from typing import Dict, Any, List
 import json
 import inspect
-from ...core.state import AgentState
+from rich.prompt import Prompt
+from rich.pretty import Pretty
+from ...core.state import AgentState, app_state
 from ...tools.registry import registry
+from ...cli.formatter import console
 
 async def executor_node(state: AgentState) -> Dict[str, Any]:
-    """Executes tool calls found in the messages with type conversion."""
+    """Executes tool calls found in the messages with type conversion and optional user confirmation."""
     last_message = state["messages"][-1]
     tool_calls = last_message.get("tool_calls", [])
     
@@ -29,20 +32,17 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                 func = registry.tools[name]
                 sig = inspect.signature(func)
                 
-                # Perform automatic type conversion based on function signature
+                # Perform automatic type conversion...
                 typed_args = {}
                 for param_name, param in sig.parameters.items():
                     if param_name in args:
                         val = args[param_name]
-                        # Handle potential Optional or Union types in annotation
                         origin = getattr(param.annotation, "__origin__", None)
                         args_list = getattr(param.annotation, "__args__", [])
-                        
                         expected_types = [param.annotation]
                         if origin is not None:
                             expected_types = list(args_list)
 
-                        # Try to cast to the first sensible type in the annotation
                         try:
                             if int in expected_types and not isinstance(val, int):
                                 typed_args[param_name] = int(val)
@@ -63,6 +63,31 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                     val = typed_args["ignore_patterns"]
                     if isinstance(val, str):
                         typed_args["ignore_patterns"] = [p.strip() for p in val.replace("[", "").replace("]", "").replace("\"", "").split(",")]
+
+                # Manual Confirmation Logic
+                if not app_state.auto_mode:
+                    allowed = False
+                    while True:
+                        console.print(f"\n[bold yellow]Permission Required:[/bold yellow] Agent wants to run [bold cyan]{name}[/bold cyan]")
+                        choice = Prompt.ask("Allow execution?", choices=["y", "n", "v"], default="n")
+                        
+                        if choice == "y":
+                            allowed = True
+                            break
+                        elif choice == "n":
+                            allowed = False
+                            break
+                        elif choice == "v":
+                            console.print("\n[bold]Parameters:[/bold]")
+                            console.print(Pretty(typed_args))
+                            # Loop back to ask again
+                    
+                    if not allowed:
+                        outputs.append({
+                            "tool_call_id": call.get("id"), 
+                            "output": f"Error: User denied permission to execute tool '{name}'."
+                        })
+                        continue
 
                 result = func(**typed_args)
                 outputs.append({"tool_call_id": call.get("id"), "output": result})

@@ -12,12 +12,11 @@ def should_retry(exception):
     return any(code in msg for code in ["429", "500", "502", "503", "504"]) or \
            any(err in msg for err in ["ReadTimeout", "ConnectError", "Network Error"])
 
-class NvidiaNimProvider(BaseProvider):
+class OpenRouterProvider(BaseProvider):
     def __init__(self, model: str = None, api_key: str = None):
-        # Default to the requested model
-        self.model = model or "minimaxai/minimax-m2.5"
-        self.api_key = api_key or settings.nvidia_api_key
-        self.base_url = "https://integrate.api.nvidia.com/v1"
+        self.model = model or "minimax/minimax-m2.5:free"
+        self.api_key = api_key or settings.openrouter_api_key
+        self.base_url = "https://openrouter.ai/api/v1"
 
     @retry(
         stop=stop_after_attempt(5),
@@ -27,12 +26,13 @@ class NvidiaNimProvider(BaseProvider):
     )
     async def generate(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         if not self.api_key:
-            raise ValueError("NVIDIA API key is required. Set NVIDIA_API_KEY in your .env file.")
+            raise ValueError("OpenRouter API key is required. Set OPENROUTER_API_KEY in your .env file.")
             
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "HTTP-Referer": "https://github.com/liteagent/liteagent",
+            "X-Title": "LiteAgent"
         }
         
         try:
@@ -42,8 +42,6 @@ class NvidiaNimProvider(BaseProvider):
                     "messages": messages,
                     "temperature": 0.5,
                     "top_p": 1,
-                    "max_tokens": 1024,
-                    "stream": False,
                 }
                 if tools:
                     payload["tools"] = tools
@@ -51,11 +49,11 @@ class NvidiaNimProvider(BaseProvider):
                 response = await client.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
                 
                 if response.status_code == 429:
-                    console.print("[yellow]Warning: Rate limit reached (429). Retrying...[/yellow]")
+                    console.print("[yellow]Warning: Rate limit reached (OpenRouter 429). Retrying...[/yellow]")
                     raise Exception(f"Rate Limit Error (429): {response.text}")
                     
                 if response.status_code != 200:
-                    error_msg = f"NVIDIA API Error ({response.status_code}): {response.text}"
+                    error_msg = f"OpenRouter API Error ({response.status_code}): {response.text}"
                     raise Exception(error_msg)
                     
                 data = response.json()
