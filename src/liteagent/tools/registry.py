@@ -1,5 +1,34 @@
-from typing import Dict, Any, Callable, List, Optional
+from typing import Dict, Any, Callable, List, Optional, Union
 import inspect
+
+SAMPLE_INPUTS = {
+    "get_workspace_info": {
+        "dir_path": ".",
+        "ignore_patterns": "['.git', '__pycache__']"
+    },
+    "search_in_files": {
+        "pattern": "def.*",
+        "dir_path": ".",
+        "file_pattern": "**/*.py",
+        "ignore_patterns": "['.venv', 'node_modules']"
+    },
+    "read_file": {
+        "file_paths": "['src/main.py', 'README.md']",
+        "start_line": "1",
+        "end_line": "50"
+    },
+    "write_file": {
+        "file_path": "new_file.txt",
+        "content": "Hello, World!"
+    },
+    "modify_file": {
+        "edits": ">>> BEGIN\n>>> FILE : example.py\n>>> SEARCH\nold code\n+++ REPLACE\nnew code\n>>> END"
+    },
+    "run_shell_command": {
+        "command": "dir",
+        "timeout": "60"
+    }
+}
 
 class ToolRegistry:
     def __init__(self):
@@ -28,11 +57,29 @@ class ToolRegistry:
             elif param.annotation == List[str] or param.annotation == Optional[List[str]]:
                 param_info["type"] = "array"
                 param_info["items"] = {"type": "string"}
+            elif param.annotation == Union[str, type(None)] or param.annotation == Optional[str]:
+                param_info["type"] = "string"
+            elif param.annotation != inspect.Parameter.empty and hasattr(param.annotation, '__origin__'):
+                # Handle generic types like Optional[List[str]]
+                if hasattr(param.annotation, '__args__'):
+                    arg = param.annotation.__args__[0]
+                    if arg == list or arg == List:
+                        param_info["type"] = "array"
+                        param_info["items"] = {"type": "string"}
+                    else:
+                        param_info["type"] = "string"
+                else:
+                    param_info["type"] = "string"
             else:
                 param_info["type"] = "string"
             
-            # Basic description from param name if docstring parsing isn't here yet
             param_info["description"] = f"Parameter: {param_name}"
+            
+            # Add sample input
+            if name in SAMPLE_INPUTS and param_name in SAMPLE_INPUTS[name]:
+                param_info["sample"] = SAMPLE_INPUTS[name][param_name]
+            elif param.default is not inspect.Parameter.empty and param.default is not None:
+                param_info["sample"] = repr(param.default)
             
             params["properties"][param_name] = param_info
             if param.default is inspect.Parameter.empty:
