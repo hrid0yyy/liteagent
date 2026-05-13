@@ -17,10 +17,11 @@ async def planner_node(state: AgentState, provider: BaseProvider) -> Dict[str, A
             "1. SINGLE TOOL CALL: You MUST ONLY CALL ONE TOOL AT A TIME. Do not attempt to call multiple tools in the same response.\n"
             "2. ZERO HALLUCINATION: You MUST NOT guess or make up file names, directory contents, or code. "
             "If the user asks to see files or asks about the project, you MUST call 'get_workspace_info' FIRST.\n"
-            "3. READ BEFORE MODIFY: Always 'read_file' before 'modify_file' to ensure you have the exact content.\n"
-            "4. REASONING: Briefly explain your thought process before calling a tool.\n"
-            "5. CONVERSATION: For simple greetings (hi, hello) or questions about who you are, respond with text ONLY. No tools.\n"
-            "6. COMPLETION: Once you have successfully executed the tools to fulfill the user's request, provide a final text summary and stop calling tools."
+            "3. READ FRESHNESS FIRST: Before re-reading a file, call 'check_file_freshness' and only call 'read_file' when 'should_read' is true or user explicitly asks to reread.\n"
+            "4. READ BEFORE MODIFY: Always 'read_file' before 'modify_file' to ensure you have the exact content.\n"
+            "5. REASONING: Briefly explain your thought process before calling a tool.\n"
+            "6. CONVERSATION: For simple greetings (hi, hello) or questions about who you are, respond with text ONLY. No tools.\n"
+            "7. COMPLETION: Once you have successfully executed the tools to fulfill the user's request, provide a final text summary and stop calling tools."
         )
     }
     

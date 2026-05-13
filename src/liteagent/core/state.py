@@ -1,9 +1,10 @@
-from typing import TypedDict, Annotated, List, Union
+from typing import TypedDict, Annotated, List, Dict, Any
 from operator import add
 
 class AppState:
     def __init__(self):
         self.auto_mode = False
+        self.read_tracker: Dict[str, Dict[str, Any]] = {}
 
 app_state = AppState()
 

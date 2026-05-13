@@ -6,6 +6,7 @@ from pathlib import Path
 from rich.prompt import Prompt
 from rich.pretty import Pretty
 from ...core.state import AgentState, app_state
+from ...core.read_tracker import record_agent_write
 from ...tools.registry import registry
 from ...cli.formatter import console
 
@@ -52,6 +53,15 @@ def _build_unified_diff(file_path: str, before, after):
     if not diff_lines:
         return None
     return "\n".join(diff_lines)
+
+
+def _tool_succeeded(name: str, result: Any) -> bool:
+    text = str(result)
+    if name == "write_file":
+        return text.startswith("Successfully wrote to ")
+    if name == "modify_file":
+        return ("Error" not in text) and ("Successfully applied" in text)
+    return True
 
 async def executor_node(state: AgentState) -> Dict[str, Any]:
     """Executes tool calls found in the messages with type conversion and optional user confirmation."""
@@ -140,13 +150,22 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                 before_contents = {path: _read_text_if_exists(path) for path in touched_paths}
                 result = func(**typed_args)
                 diffs = []
+                after_contents = {}
                 for path in touched_paths:
                     after_content = _read_text_if_exists(path)
+                    after_contents[path] = after_content
                     before_content = before_contents.get(path)
                     if before_content != after_content and after_content is not None:
                         diff_text = _build_unified_diff(path, before_content, after_content)
                         if diff_text:
                             diffs.append({"path": path, "diff": diff_text})
+
+                if name in {"write_file", "modify_file"} and _tool_succeeded(name, result):
+                    for path in touched_paths:
+                        after_content = after_contents.get(path)
+                        if after_content is None:
+                            continue
+                        record_agent_write(path, after_content, operation_id=str(call.get("id", "")))
 
                 outputs.append({
                     "tool_call_id": call.get("id"),
