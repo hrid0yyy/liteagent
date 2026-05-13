@@ -13,6 +13,10 @@ SAMPLE_INPUTS = {
         "ignore_patterns": "['.venv', 'node_modules']",
         "literal": "false"
     },
+    "list_files": {
+        "pattern": "**/*.py",
+        "dir_path": "."
+    },
     "read_file": {
         "file_paths": "['src/main.py', 'README.md']",
         "start_line": "1",
@@ -106,12 +110,13 @@ class ToolRegistry:
 registry = ToolRegistry()
 
 # Registering tools
-from .workspace import get_workspace_info, search_in_files
+from .workspace import get_workspace_info, search_in_files, list_files
 from .file_ops import read_file, check_file_freshness, write_file, rename_path, delete_path, modify_file
 from .shell import run_shell_command
 
 registry.register(get_workspace_info)
 registry.register(search_in_files)
+registry.register(list_files)
 registry.register(read_file)
 registry.register(check_file_freshness)
 registry.register(write_file)

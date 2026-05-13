@@ -37,6 +37,50 @@ def get_workspace_info(dir_path: str = ".", ignore_patterns: Optional[List[str]]
     _list_dir(base_path)
     return "\n".join(output)
 
+
+def _find_project_root(start_path: Path) -> Path:
+    current = start_path.resolve()
+    if current.is_file():
+        current = current.parent
+    for candidate in [current] + list(current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return Path.cwd().resolve()
+
+
+def list_files(pattern: str = "**/*", dir_path: Optional[str] = None) -> str:
+    """
+    Lists files and directories matching a glob pattern.
+
+    Args:
+        pattern: Glob pattern to match (e.g., '**/*.py', '**/tests', '*').
+        dir_path: Optional directory path to search from. If omitted, uses project root.
+    """
+    base_path = Path(dir_path).resolve() if dir_path else _find_project_root(Path.cwd())
+    if not base_path.exists():
+        return f"Error: Path does not exist: {base_path}"
+    if not base_path.is_dir():
+        return f"Error: Path is not a directory: {base_path}"
+
+    matches = []
+    try:
+        for item in base_path.glob(pattern):
+            if item == base_path:
+                continue
+            rel = item.relative_to(base_path).as_posix()
+            matches.append(rel + ("/" if item.is_dir() else ""))
+    except re.error as e:
+        return f"Error: Invalid glob pattern - {e}"
+    except Exception as e:
+        return f"Error while listing files: {e}"
+
+    if not matches:
+        return f"No matches found for pattern: {pattern}"
+
+    matches = sorted(set(matches))
+    return "\n".join(matches)
+
+
 def search_in_files(
     pattern: str,
     dir_path: str = ".",
