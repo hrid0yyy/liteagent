@@ -37,15 +37,22 @@ def get_workspace_info(dir_path: str = ".", ignore_patterns: Optional[List[str]]
     _list_dir(base_path)
     return "\n".join(output)
 
-def search_in_files(pattern: str, dir_path: str = ".", file_pattern: str = "**/*", ignore_patterns: Optional[List[str]] = None) -> str:
+def search_in_files(
+    pattern: str,
+    dir_path: str = ".",
+    file_pattern: str = "**/*",
+    ignore_patterns: Optional[List[str]] = None,
+    literal: bool = False,
+) -> str:
     """
-    Searches for a regular expression pattern within files matching a glob pattern.
+    Searches within files matching a glob pattern using regex or literal text matching.
     
     Args:
-        pattern: The regular expression to search for.
+        pattern: The regex pattern or literal text to search for.
         dir_path: The directory to start searching from (defaults to '.').
         file_pattern: Glob pattern to filter files (e.g., '**/*.py'). Defaults to '**/*'.
         ignore_patterns: Additional directories to ignore.
+        literal: If True, treats pattern as plain text instead of regex.
     """
     base_path = Path(dir_path).resolve()
     
@@ -55,7 +62,8 @@ def search_in_files(pattern: str, dir_path: str = ".", file_pattern: str = "**/*
         default_ignore_dirs.update(ignore_patterns)
 
     try:
-        regex = re.compile(pattern)
+        effective_pattern = re.escape(pattern) if literal else pattern
+        regex = re.compile(effective_pattern)
     except re.error as e:
         return f"Error: Invalid regular expression pattern - {e}"
 

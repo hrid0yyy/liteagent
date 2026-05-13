@@ -10,7 +10,8 @@ SAMPLE_INPUTS = {
         "pattern": "def.*",
         "dir_path": ".",
         "file_pattern": "**/*.py",
-        "ignore_patterns": "['.venv', 'node_modules']"
+        "ignore_patterns": "['.venv', 'node_modules']",
+        "literal": "false"
     },
     "read_file": {
         "file_paths": "['src/main.py', 'README.md']",
