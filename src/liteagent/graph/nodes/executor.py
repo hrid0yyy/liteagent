@@ -1,11 +1,57 @@
 from typing import Dict, Any, List
 import json
 import inspect
+import difflib
+from pathlib import Path
 from rich.prompt import Prompt
 from rich.pretty import Pretty
 from ...core.state import AgentState, app_state
 from ...tools.registry import registry
 from ...cli.formatter import console
+
+def _extract_paths_for_diff(tool_name: str, args: Dict[str, Any]) -> List[str]:
+    if tool_name == "write_file":
+        file_path = args.get("file_path")
+        return [file_path] if isinstance(file_path, str) and file_path.strip() else []
+
+    if tool_name == "modify_file":
+        edits = args.get("edits", "")
+        if not isinstance(edits, str):
+            return []
+        paths = []
+        for block in edits.split(">>> FILE : ")[1:]:
+            lines = block.splitlines()
+            if not lines:
+                continue
+            file_path = lines[0].strip()
+            if file_path:
+                paths.append(file_path)
+        return list(dict.fromkeys(paths))
+
+    return []
+
+def _read_text_if_exists(file_path: str):
+    path = Path(file_path)
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+def _build_unified_diff(file_path: str, before, after):
+    before_lines = [] if before is None else before.splitlines()
+    after_lines = [] if after is None else after.splitlines()
+    diff_lines = list(difflib.unified_diff(
+        before_lines,
+        after_lines,
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
+        lineterm=""
+    ))
+    if not diff_lines:
+        return None
+    return "\n".join(diff_lines)
 
 async def executor_node(state: AgentState) -> Dict[str, Any]:
     """Executes tool calls found in the messages with type conversion and optional user confirmation."""
@@ -85,12 +131,29 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                     if not allowed:
                         outputs.append({
                             "tool_call_id": call.get("id"), 
+                            "name": name,
                             "output": f"Error: User denied permission to execute tool '{name}'."
                         })
                         continue
 
+                touched_paths = _extract_paths_for_diff(name, typed_args)
+                before_contents = {path: _read_text_if_exists(path) for path in touched_paths}
                 result = func(**typed_args)
-                outputs.append({"tool_call_id": call.get("id"), "output": result})
+                diffs = []
+                for path in touched_paths:
+                    after_content = _read_text_if_exists(path)
+                    before_content = before_contents.get(path)
+                    if before_content != after_content and after_content is not None:
+                        diff_text = _build_unified_diff(path, before_content, after_content)
+                        if diff_text:
+                            diffs.append({"path": path, "diff": diff_text})
+
+                outputs.append({
+                    "tool_call_id": call.get("id"),
+                    "name": name,
+                    "output": result,
+                    "diffs": diffs
+                })
             except Exception as e:
                 import traceback
                 errors.append(f"Error executing {name}: {str(e)}\n{traceback.format_exc()}")

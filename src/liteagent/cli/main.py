@@ -12,7 +12,7 @@ from ..providers.ollama import OllamaProvider
 from ..providers.nvidia_nim import NvidiaNimProvider
 from ..providers.openrouter import OpenRouterProvider
 from ..graph.builder import create_graph
-from .formatter import format_message, console
+from .formatter import format_message, format_tool_output, console
 from .server import start_server
 
 # Suppress annoying dependency warnings
@@ -130,7 +130,11 @@ async def _execute_graph(graph, state, verbose=False):
             if "errors" in node_state and node_state["errors"]:
                 for err in node_state["errors"]:
                     console.print(f"[red]Error:[/red] {err}")
-            
+
+            if "tool_outputs" in node_state and node_state["tool_outputs"]:
+                for out in node_state["tool_outputs"]:
+                    format_tool_output(out)
+             
             # Merge state updates
             for key, value in node_state.items():
                 if key == "messages":

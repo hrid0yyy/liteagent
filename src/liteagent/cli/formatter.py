@@ -30,3 +30,28 @@ def format_message(message: dict, show_thinking: bool = True):
     elif role == "tool":
         # Raw tool output hidden to keep chat clean
         pass
+
+def format_tool_output(tool_output: dict):
+    name = tool_output.get("name")
+    if name not in {"write_file", "modify_file"}:
+        return
+
+    diffs = tool_output.get("diffs", [])
+    for item in diffs:
+        path = item.get("path", "unknown")
+        diff = item.get("diff", "")
+        if not diff:
+            continue
+
+        console.print(f"[bold]Diff[/bold] [cyan]{path}[/cyan]")
+        for line in diff.splitlines():
+            if line.startswith("@@"):
+                console.print(line, style="cyan", markup=False)
+            elif line.startswith("+++ ") or line.startswith("--- "):
+                console.print(line, style="bold", markup=False)
+            elif line.startswith("+"):
+                console.print(line, style="green", markup=False)
+            elif line.startswith("-"):
+                console.print(line, style="red", markup=False)
+            else:
+                console.print(line, style="dim", markup=False)
