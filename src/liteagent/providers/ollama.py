@@ -2,6 +2,7 @@ import httpx
 from typing import List, Dict, Any, Optional
 from .base import BaseProvider
 from ..core.config import settings
+from ..core.logger import log_event, log_error
 
 class OllamaProvider(BaseProvider):
     def __init__(self, model: str = None, base_url: str = None):
@@ -17,10 +18,20 @@ class OllamaProvider(BaseProvider):
             }
             if tools:
                 payload["tools"] = tools
+            log_event("provider_request", "provider.ollama", {"url": f"{self.base_url}/api/chat", "payload": payload})
             
             response = await client.post(f"{self.base_url}/api/chat", json=payload)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except Exception as e:
+                log_error(
+                    "provider.ollama",
+                    e,
+                    {"status_code": response.status_code, "response_text": response.text, "payload": payload},
+                )
+                raise
             data = response.json()
+            log_event("provider_response", "provider.ollama", {"status_code": response.status_code, "response_json": data})
             return data["message"]
 
     def get_tool_schema(self, tool_definition: Dict[str, Any]) -> Dict[str, Any]:

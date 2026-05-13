@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from .base import BaseProvider
 from ..core.config import settings
+from ..core.logger import log_event, log_error
 from ..cli.formatter import console
 
 def should_retry(exception):
@@ -47,21 +48,39 @@ class NvidiaNimProvider(BaseProvider):
                 }
                 if tools:
                     payload["tools"] = tools
+                log_event(
+                    "provider_request",
+                    "provider.nvidia",
+                    {"url": f"{self.base_url}/chat/completions", "payload": payload},
+                )
                 
                 response = await client.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
                 
                 if response.status_code == 429:
                     console.print("[yellow]Warning: Rate limit reached (429). Retrying...[/yellow]")
+                    log_event(
+                        "provider_retry",
+                        "provider.nvidia",
+                        {"status_code": response.status_code, "response_text": response.text},
+                        level="warn",
+                    )
                     raise Exception(f"Rate Limit Error (429): {response.text}")
                     
                 if response.status_code != 200:
                     error_msg = f"NVIDIA API Error ({response.status_code}): {response.text}"
+                    log_error(
+                        "provider.nvidia",
+                        error_msg,
+                        {"status_code": response.status_code, "response_text": response.text, "payload": payload},
+                    )
                     raise Exception(error_msg)
                     
                 data = response.json()
+                log_event("provider_response", "provider.nvidia", {"status_code": response.status_code, "response_json": data})
                 return data["choices"][0]["message"]
         except (httpx.ReadTimeout, httpx.ConnectError) as e:
             console.print(f"[yellow]Warning: Network error ({str(e)}). Retrying...[/yellow]")
+            log_error("provider.nvidia", e, {"stage": "network_exception"})
             raise Exception(f"Network Error: {str(e)}")
 
     def get_tool_schema(self, tool_definition: Dict[str, Any]) -> Dict[str, Any]:

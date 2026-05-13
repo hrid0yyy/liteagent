@@ -20,4 +20,10 @@ class Settings(BaseSettings):
     default_provider: str = "ollama"
     default_model: str = "llama3" # Default for Ollama
 
+    # Session logging
+    log_enabled: bool = True
+    log_verbose_raw: bool = True
+    log_dir: str = str(Path.home() / ".liteagent")
+    log_max_payload_chars: int = 500000
+
 settings = Settings()

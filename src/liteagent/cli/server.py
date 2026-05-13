@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi import Body
 from ..tools.registry import registry
+from ..core.logger import log_event, log_error
 
 app = FastAPI(title="LiteAgent Tool Inspector")
 
@@ -14,14 +15,17 @@ async def get_tools():
 async def execute_tool(data: dict = Body(...)):
     tool_name = data.get("tool_name")
     params = data.get("params", {})
-    print(f"Execute request: tool={tool_name}, params={params}")
+    log_event("server_tool_execute_request", "server", {"tool_name": tool_name, "params": params})
     if tool_name not in registry.tools:
+        log_event("server_tool_not_found", "server", {"tool_name": tool_name}, level="error")
         return {"error": f"Tool '{tool_name}' not found"}
     try:
         result = registry.tools[tool_name](**params)
+        log_event("server_tool_execute_response", "server", {"tool_name": tool_name, "result": result})
         return {"result": result}
     except Exception as e:
         import traceback
+        log_error("server", e, {"tool_name": tool_name, "params": params, "traceback": traceback.format_exc()})
         return {"error": str(e) + "\n" + traceback.format_exc()}
 
 @app.get("/", response_class=HTMLResponse)

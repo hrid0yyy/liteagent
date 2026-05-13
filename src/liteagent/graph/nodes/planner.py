@@ -1,5 +1,6 @@
 from typing import Dict, Any
 from ...core.state import AgentState
+from ...core.logger import log_event, log_error
 from ...providers.base import BaseProvider
 from ...tools.registry import registry
 import os
@@ -28,8 +29,30 @@ async def planner_node(state: AgentState, provider: BaseProvider) -> Dict[str, A
     # We only send the recent conversation history to keep the context clean
     full_messages = [system_prompt] + messages
     provider_tools = [provider.get_tool_schema(s) for s in registry.schemas]
-    
-    response = await provider.generate(full_messages, tools=provider_tools)
+    log_event(
+        "planner_generate_start",
+        "planner",
+        {
+            "cwd": cwd,
+            "message_count": len(full_messages),
+            "messages": full_messages,
+            "tool_schema_count": len(provider_tools),
+            "tool_schemas": provider_tools,
+            "provider_model": getattr(provider, "model", ""),
+        },
+    )
+
+    try:
+        response = await provider.generate(full_messages, tools=provider_tools)
+    except Exception as e:
+        log_error("planner", e, {"stage": "provider_generate"})
+        raise
+
+    log_event(
+        "planner_generate_end",
+        "planner",
+        {"response": response},
+    )
     
     return {
         "messages": [response]

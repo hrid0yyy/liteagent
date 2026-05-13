@@ -5,6 +5,11 @@ class AppState:
     def __init__(self):
         self.auto_mode = False
         self.read_tracker: Dict[str, Dict[str, Any]] = {}
+        self.session_id: str = ""
+        self.session_log_path: str = ""
+        self.turn_index: int = 0
+        self.tool_call_count: int = 0
+        self.error_count: int = 0
 
 app_state = AppState()
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from rich.prompt import Prompt
 from rich.pretty import Pretty
 from ...core.state import AgentState, app_state
+from ...core.logger import log_event, log_error
 from ...core.read_tracker import record_agent_write
 from ...tools.registry import registry
 from ...cli.formatter import console
@@ -67,6 +68,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     """Executes tool calls found in the messages with type conversion and optional user confirmation."""
     last_message = state["messages"][-1]
     tool_calls = last_message.get("tool_calls", [])
+    log_event("executor_start", "executor", {"tool_calls": tool_calls}, turn_index=app_state.turn_index)
     
     outputs = []
     errors = []
@@ -75,12 +77,20 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
         function_info = call.get("function", call)
         name = function_info["name"]
         args = function_info.get("arguments", {})
+        log_event("tool_call_received", "executor", {"name": name, "raw_arguments": args, "call": call}, turn_index=app_state.turn_index)
         
         if isinstance(args, str):
             try:
                 args = json.loads(args)
             except json.JSONDecodeError:
                 errors.append(f"Failed to parse arguments for {name}: {args}")
+                log_event(
+                    "tool_arg_parse_failed",
+                    "executor",
+                    {"name": name, "raw_arguments": function_info.get("arguments", {})},
+                    level="error",
+                    turn_index=app_state.turn_index,
+                )
                 continue
 
         if name in registry.tools:
@@ -119,6 +129,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                     val = typed_args["ignore_patterns"]
                     if isinstance(val, str):
                         typed_args["ignore_patterns"] = [p.strip() for p in val.replace("[", "").replace("]", "").replace("\"", "").split(",")]
+                log_event("tool_args_typed", "executor", {"name": name, "typed_args": typed_args}, turn_index=app_state.turn_index)
 
                 # Manual Confirmation Logic
                 if not app_state.auto_mode:
@@ -139,6 +150,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                             # Loop back to ask again
                     
                     if not allowed:
+                        log_event("tool_permission_denied", "executor", {"name": name, "typed_args": typed_args}, level="warn", turn_index=app_state.turn_index)
                         outputs.append({
                             "tool_call_id": call.get("id"), 
                             "name": name,
@@ -148,6 +160,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
 
                 touched_paths = _extract_paths_for_diff(name, typed_args)
                 before_contents = {path: _read_text_if_exists(path) for path in touched_paths}
+                log_event("tool_execute_start", "executor", {"name": name, "typed_args": typed_args, "touched_paths": touched_paths}, turn_index=app_state.turn_index)
                 result = func(**typed_args)
                 diffs = []
                 after_contents = {}
@@ -166,6 +179,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                         if after_content is None:
                             continue
                         record_agent_write(path, after_content, operation_id=str(call.get("id", "")))
+                log_event("tool_execute_end", "executor", {"name": name, "result": result, "diffs": diffs}, turn_index=app_state.turn_index)
 
                 outputs.append({
                     "tool_call_id": call.get("id"),
@@ -176,16 +190,25 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             except Exception as e:
                 import traceback
                 errors.append(f"Error executing {name}: {str(e)}\n{traceback.format_exc()}")
+                log_error(
+                    "executor",
+                    e,
+                    {"name": name, "traceback": traceback.format_exc()},
+                    turn_index=app_state.turn_index,
+                )
         else:
             errors.append(f"Tool {name} not found.")
+            log_event("tool_not_found", "executor", {"name": name}, level="error", turn_index=app_state.turn_index)
 
     tool_messages = [
         {"role": "tool", "content": str(out["output"]), "tool_call_id": out.get("tool_call_id")}
         for out in outputs
     ]
     
-    return {
+    result_state = {
         "messages": tool_messages,
         "tool_outputs": outputs,
         "errors": errors
     }
+    log_event("executor_end", "executor", {"outputs": outputs, "errors": errors}, turn_index=app_state.turn_index)
+    return result_state
