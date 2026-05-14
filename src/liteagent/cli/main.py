@@ -111,9 +111,21 @@ async def _run_chat(provider_name: str, model: Optional[str]):
 
     console.print(Panel("Interactive Chat Started. Type 'exit' or 'quit' to end.", title="LiteAgent Chat", expand=False))
 
-    # Start the web tool inspector in the background
-    asyncio.create_task(start_server())
-    console.print("[bold cyan]🌐 Tool Inspector running at http://localhost:8000[/bold cyan]")
+    # Start tool inspector with dynamic port fallback
+    inspector_info = await start_server(
+        host=settings.inspector_host,
+        preferred_port=settings.inspector_port,
+        search_limit=settings.inspector_port_search_limit,
+    )
+    inspector_task = inspector_info.get("task")
+    if inspector_info.get("started"):
+        inspector_url = f"http://{inspector_info['host']}:{inspector_info['port']}"
+        console.print(f"[bold cyan]🌐 Tool Inspector running at {inspector_url}[/bold cyan]")
+        log_event("inspector_ready", "cli", {"url": inspector_url}, turn_index=app_state.turn_index)
+    else:
+        reason = inspector_info.get("reason", "unknown")
+        console.print(f"[bold yellow]⚠ Tool Inspector unavailable ({reason}). Chat continues.[/bold yellow]")
+        log_event("inspector_unavailable", "cli", inspector_info, level="warn", turn_index=app_state.turn_index)
 
     kb = KeyBindings()
 

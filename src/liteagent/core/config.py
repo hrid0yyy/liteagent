@@ -26,4 +26,10 @@ class Settings(BaseSettings):
     log_dir: str = str(Path.home() / ".liteagent")
     log_max_payload_chars: int = 500000
 
+    # Tool inspector server
+    inspector_enabled: bool = True
+    inspector_host: str = "127.0.0.1"
+    inspector_port: int = 8000
+    inspector_port_search_limit: int = 100
+
 settings = Settings()

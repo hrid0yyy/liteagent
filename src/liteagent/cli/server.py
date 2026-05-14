@@ -1,8 +1,12 @@
+import asyncio
+import socket
+from typing import Any, Dict, Optional
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi import Body
 from ..tools.registry import registry
+from ..core.config import settings
 from ..core.logger import log_event, log_error
 
 app = FastAPI(title="LiteAgent Tool Inspector")
@@ -268,7 +272,58 @@ async def get_index():
 </html>
 """
 
-async def start_server():
-    config = uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="warning")
-    server = uvicorn.Server(config)
-    await server.serve()
+def _is_port_free(host: str, port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+async def start_server(
+    host: Optional[str] = None,
+    preferred_port: Optional[int] = None,
+    search_limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    host = host or settings.inspector_host
+    preferred_port = int(preferred_port if preferred_port is not None else settings.inspector_port)
+    search_limit = int(search_limit if search_limit is not None else settings.inspector_port_search_limit)
+    search_limit = max(1, search_limit)
+
+    if not settings.inspector_enabled:
+        log_event("inspector_disabled", "server", {"host": host, "preferred_port": preferred_port})
+        return {"started": False, "host": host, "port": None, "task": None, "reason": "disabled"}
+
+    for offset in range(search_limit):
+        port = preferred_port + offset
+        if not _is_port_free(host, port):
+            continue
+
+        config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+        server = uvicorn.Server(config)
+        task = asyncio.create_task(server.serve())
+        await asyncio.sleep(0.2)
+
+        if task.done():
+            exc = task.exception()
+            log_event(
+                "inspector_port_failed",
+                "server",
+                {"host": host, "port": port, "error": str(exc) if exc else "server exited"},
+                level="warn",
+            )
+            continue
+
+        log_event("inspector_started", "server", {"host": host, "port": port})
+        return {"started": True, "host": host, "port": port, "task": task, "reason": ""}
+
+    log_event(
+        "inspector_start_failed",
+        "server",
+        {"host": host, "preferred_port": preferred_port, "search_limit": search_limit},
+        level="warn",
+    )
+    return {"started": False, "host": host, "port": None, "task": None, "reason": "no-free-port"}
