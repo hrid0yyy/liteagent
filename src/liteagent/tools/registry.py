@@ -22,9 +22,6 @@ SAMPLE_INPUTS = {
         "start_line": "1",
         "end_line": "50"
     },
-    "check_file_freshness": {
-        "file_paths": "['src/main.py', 'README.md']"
-    },
     "write_file": {
         "file_path": "new_file.txt",
         "content": "Hello, World!"
@@ -111,14 +108,13 @@ registry = ToolRegistry()
 
 # Registering tools
 from .workspace import get_workspace_info, search_in_files, list_files
-from .file_ops import read_file, check_file_freshness, write_file, rename_path, delete_path, modify_file
+from .file_ops import read_file, write_file, rename_path, delete_path, modify_file
 from .shell import run_shell_command
 
 registry.register(get_workspace_info)
 registry.register(search_in_files)
 registry.register(list_files)
 registry.register(read_file)
-registry.register(check_file_freshness)
 registry.register(write_file)
 registry.register(rename_path)
 registry.register(delete_path)

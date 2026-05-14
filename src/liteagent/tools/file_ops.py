@@ -3,12 +3,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Optional, List
-from ..core.read_tracker import (
-    record_read,
-    check_file_freshness as _check_file_freshness,
-    rename_tracked_path,
-    remove_tracked_path,
-)
+from ..core.container import get_container
 
 def read_file(file_paths: List[str], start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
     """Reads one or more files, optionally within a specific line range, prepending line numbers."""
@@ -32,7 +27,7 @@ def read_file(file_paths: List[str], start_line: Optional[int] = None, end_line:
             content = "\n".join(numbered_lines)
 
             is_full_read = start == 0 and end >= len(lines)
-            record_read(str(path), raw_content, is_full_read=is_full_read)
+            get_container().read_tracker.record_read(str(path), raw_content, is_full_read=is_full_read)
             
             all_output.append(f"--- {file_path} (Lines {start+1}-{end}) ---\n{content}\n--- End of selection ---")
         except Exception as e:
@@ -50,12 +45,6 @@ def write_file(file_path: str, content: str) -> str:
     except Exception as e:
         return f"Error writing to {file_path}: {str(e)}"
 
-
-def check_file_freshness(file_paths: List[str]) -> str:
-    """Checks if files need to be read again in this session based on freshness tracking."""
-    return _check_file_freshness(file_paths)
-
-
 def rename_path(old_path: str, new_path: str) -> str:
     """Renames a file or directory to a new path."""
     source = Path(old_path)
@@ -70,7 +59,7 @@ def rename_path(old_path: str, new_path: str) -> str:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         source.rename(target)
-        rename_tracked_path(str(source), str(target))
+        get_container().read_tracker.rename_tracked_path(str(source), str(target))
         item_type = "directory" if target.is_dir() else "file"
         return f"Successfully renamed {item_type} from {old_path} to {new_path}"
     except Exception as e:
@@ -87,11 +76,11 @@ def delete_path(path_to_delete: str) -> str:
     try:
         if path.is_file():
             path.unlink()
-            remove_tracked_path(str(path))
+            get_container().read_tracker.remove_tracked_path(str(path))
             return f"Successfully deleted file {path_to_delete}"
         if path.is_dir():
             shutil.rmtree(path)
-            remove_tracked_path(str(path))
+            get_container().read_tracker.remove_tracked_path(str(path))
             return f"Successfully deleted directory {path_to_delete}"
         return f"Error: Unsupported path type for {path_to_delete}"
     except Exception as e:

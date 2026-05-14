@@ -7,7 +7,7 @@ from rich.prompt import Prompt
 from rich.pretty import Pretty
 from ...core.state import AgentState, app_state
 from ...core.logger import log_event, log_error
-from ...core.read_tracker import record_agent_write
+from ...core.container import get_container
 from ...tools.registry import registry
 from ...cli.formatter import console
 
@@ -178,7 +178,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                         after_content = after_contents.get(path)
                         if after_content is None:
                             continue
-                        record_agent_write(path, after_content, operation_id=str(call.get("id", "")))
+                        get_container().read_tracker.record_agent_write(path, after_content, operation_id=str(call.get("id", "")))
                 log_event("tool_execute_end", "executor", {"name": name, "result": result, "diffs": diffs}, turn_index=app_state.turn_index)
 
                 outputs.append({
