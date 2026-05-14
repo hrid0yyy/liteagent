@@ -36,11 +36,12 @@ def do(
     task: str = typer.Argument(None, help="The task for the agent to perform."),
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
-    resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'.")
+    resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
 ):
     """Run a single task using the agent."""
     try:
-        asyncio.run(_run_task(task, provider_name, model, resume))
+        asyncio.run(_run_task(task, provider_name, model, resume, inspector))
     except KeyboardInterrupt:
         pass
 
@@ -48,11 +49,12 @@ def do(
 def chat(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
-    resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'.")
+    resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
 ):
     """Open an interactive chat session with the agent."""
     try:
-        asyncio.run(_run_chat(provider_name, model, resume))
+        asyncio.run(_run_chat(provider_name, model, resume, inspector))
     except KeyboardInterrupt:
         pass
 
@@ -86,7 +88,7 @@ async def _select_session() -> Optional[str]:
             
     return None
 
-async def _run_task(task: str, provider_name: str, model: Optional[str], resume: Optional[str]):
+async def _run_task(task: str, provider_name: str, model: Optional[str], resume: Optional[str], inspector: bool = True):
     session_id = None
     state = None
     
@@ -152,7 +154,7 @@ async def _run_task(task: str, provider_name: str, model: Optional[str], resume:
         })
     console.print("\n[bold green]Task processing finished.[/bold green]")
 
-async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[str]):
+async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[str], inspector: bool = True):
     session_id = None
     state = None
     
@@ -203,21 +205,24 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
         console.print(Panel("Interactive Chat Started. Type 'exit' or 'quit' to end.", title="LiteAgent Chat", expand=False))
 
     # Start tool inspector with dynamic port fallback
-    inspector_info = await start_server(
-        host=settings.inspector_host,
-        preferred_port=settings.inspector_port,
-        search_limit=settings.inspector_port_search_limit,
-    )
-    inspector_task = inspector_info.get("task")
-    inspector_server = inspector_info.get("server")
-    if inspector_info.get("started"):
-        inspector_url = f"http://{inspector_info['host']}:{inspector_info['port']}"
-        console.print(f"[bold cyan]🌐 Tool Inspector running at {inspector_url}[/bold cyan]")
-        log_event("inspector_ready", "cli", {"url": inspector_url}, turn_index=app_state.turn_index)
-    else:
-        reason = inspector_info.get("reason", "unknown")
-        console.print(f"[bold yellow]⚠ Tool Inspector unavailable ({reason}). Chat continues.[/bold yellow]")
-        log_event("inspector_unavailable", "cli", inspector_info, level="warn", turn_index=app_state.turn_index)
+    inspector_task = None
+    inspector_server = None
+    if inspector:
+        inspector_info = await start_server(
+            host=settings.inspector_host,
+            preferred_port=settings.inspector_port,
+            search_limit=settings.inspector_port_search_limit,
+        )
+        inspector_task = inspector_info.get("task")
+        inspector_server = inspector_info.get("server")
+        if inspector_info.get("started"):
+            inspector_url = f"http://{inspector_info['host']}:{inspector_info['port']}"
+            console.print(f"[bold cyan]Tool Inspector running at {inspector_url}[/bold cyan]")
+            log_event("inspector_ready", "cli", {"url": inspector_url}, turn_index=app_state.turn_index)
+        else:
+            reason = inspector_info.get("reason", "unknown")
+            console.print(f"[bold yellow]Tool Inspector unavailable ({reason}). Chat continues.[/bold yellow]")
+            log_event("inspector_unavailable", "cli", inspector_info, level="warn", turn_index=app_state.turn_index)
 
     kb = KeyBindings()
 
