@@ -3,6 +3,9 @@ from rich.panel import Panel
 from rich.live import Live
 from rich.text import Text
 from typing import Optional
+from pathlib import Path
+
+from .markdown_renderer import render_markdown
 
 console = Console()
 
@@ -130,6 +133,11 @@ def format_tool_output(tool_output: dict):
     for item in diffs:
         path = item.get("path", "unknown")
         diff = item.get("diff", "")
+
+        if Path(path).suffix.lower() == ".md":
+            render_markdown(path)
+            continue
+
         if not diff:
             continue
 

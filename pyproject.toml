@@ -10,6 +10,7 @@ dependencies = [
     "pydantic-settings",
     "httpx",
     "rich",
+    "mistune",
     "python-dotenv",
     "prompt_toolkit",
     "tenacity",
