@@ -161,7 +161,17 @@ async def _run_chat(provider_name: str, model: Optional[str]):
             log_event("user_input", "cli", {"content": user_input}, turn_index=app_state.turn_index)
             
             try:
-                state = await _execute_graph(graph, state, verbose=False)
+                # Store the task so we can cancel it from an interrupt
+                current_task = asyncio.create_task(_execute_graph(graph, state, verbose=False))
+                state = await current_task
+            except asyncio.CancelledError:
+                # Task was cancelled, state already updated in _execute_graph
+                pass
+            except KeyboardInterrupt:
+                if 'current_task' in locals() and not current_task.done():
+                    current_task.cancel()
+                    await asyncio.wait([current_task])
+                console.print("\n[yellow]Interrupted. Returning to prompt...[/yellow]")
             except Exception as e:
                 app_state.error_count += 1
                 log_error("cli", e, {"phase": "chat_loop"}, turn_index=app_state.turn_index)
@@ -187,6 +197,24 @@ def _get_provider(provider_name: str, model: Optional[str]):
 async def _execute_graph(graph, state, verbose=False):
     current_state = state
     log_event("graph_execute_start", "cli", {"verbose": verbose}, turn_index=app_state.turn_index)
+    
+    # Run the graph stream in a task so it can be cancelled
+    execution_task = asyncio.create_task(_run_stream(graph, state, current_state))
+    
+    try:
+        await execution_task
+    except asyncio.CancelledError:
+        console.print("\n[bold red]Execution cancelled by user.[/bold red]")
+        # We don't re-raise here because we want to return the current state
+        # The executor node should have already injected a "Cancelled" message if it was in a tool call
+    except Exception as e:
+        log_error("cli", e, {"phase": "execute_graph"})
+        raise
+    
+    log_event("graph_execute_end", "cli", {}, turn_index=app_state.turn_index)
+    return current_state
+
+async def _run_stream(graph, state, current_state):
     async for event in graph.astream(state):
         log_event("graph_event", "cli", {"event": event}, turn_index=app_state.turn_index)
         for node_name, node_state in event.items():
@@ -217,9 +245,6 @@ async def _execute_graph(graph, state, verbose=False):
                     current_state["messages"].extend(value)
                 else:
                     current_state[key] = value
-    
-    log_event("graph_execute_end", "cli", {}, turn_index=app_state.turn_index)
-    return current_state
 
 if __name__ == "__main__":
     app()

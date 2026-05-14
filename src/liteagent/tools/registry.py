@@ -60,6 +60,9 @@ class ToolRegistry:
         }
         
         for param_name, param in sig.parameters.items():
+            if param_name == "on_output":
+                continue
+                
             param_info = {}
             
             # More robust type mapping

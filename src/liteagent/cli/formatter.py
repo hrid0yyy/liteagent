@@ -1,7 +1,54 @@
 from rich.console import Console
 from rich.panel import Panel
+from rich.live import Live
+from rich.text import Text
+from typing import Optional
 
 console = Console()
+
+class LiveStreamHandler:
+    def __init__(self, title: str = "Execution Log"):
+        self.lines = []
+        self.title = title
+        self.max_lines = 15
+        self.panel = Panel("", title=f"[bold cyan]{title}[/bold cyan]", border_style="cyan")
+        self.live: Optional[Live] = None
+
+    def start(self):
+        self.live = Live(self.panel, console=console, refresh_per_second=10, transient=True)
+        self.live.start()
+
+    def update(self, line: str):
+        self.lines.append(line)
+        if len(self.lines) > self.max_lines:
+            self.lines.pop(0)
+        
+        content = "\n".join(self.lines)
+        self.panel.renderable = Text.from_markup(content)
+        if self.live:
+            self.live.update(self.panel)
+
+    def stop(self):
+        if self.live:
+            self.live.stop()
+            self.live = None
+
+_active_live_handler: Optional[LiveStreamHandler] = None
+
+def start_live_stream(title: str = "Execution Log") -> LiveStreamHandler:
+    global _active_live_handler
+    if _active_live_handler:
+        _active_live_handler.stop()
+    
+    _active_live_handler = LiveStreamHandler(title)
+    _active_live_handler.start()
+    return _active_live_handler
+
+def stop_live_stream():
+    global _active_live_handler
+    if _active_live_handler:
+        _active_live_handler.stop()
+        _active_live_handler = None
 
 def format_message(message: dict, show_thinking: bool = True):
     role = message.get("role", "unknown")

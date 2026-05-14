@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+import asyncio
 import json
 import inspect
 import difflib
@@ -313,7 +314,26 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             touched_paths = _extract_paths_for_diff(name, typed_args)
             before_contents = {path: _read_text_if_exists(path) for path in touched_paths}
             log_event("tool_execute_start", "executor", {"name": name, "typed_args": typed_args, "touched_paths": touched_paths}, turn_index=app_state.turn_index)
-            result = func(**typed_args)
+            
+            # Non-blocking tool execution
+            if name == "run_shell_command":
+                # Inject on_output callback for live streaming
+                from ...cli.formatter import start_live_stream, stop_live_stream
+                
+                live = start_live_stream(f"Running: {typed_args.get('command')}")
+                def on_output(line):
+                    live.update(line)
+                
+                try:
+                    typed_args["on_output"] = on_output
+                    result = await func(**typed_args)
+                finally:
+                    stop_live_stream()
+            elif inspect.iscoroutinefunction(func):
+                result = await func(**typed_args)
+            else:
+                result = await asyncio.to_thread(func, **typed_args)
+
             diffs = []
             after_contents = {}
             for path in touched_paths:
@@ -339,6 +359,20 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                 "output": result,
                 "diffs": diffs
             })
+        except asyncio.CancelledError:
+            log_event("tool_execute_cancelled", "executor", {"name": name}, level="warn", turn_index=app_state.turn_index)
+            _append_tool_error(
+                outputs,
+                errors,
+                tool_name=name,
+                tool_call_id=tool_call_id,
+                error_type="CANCELLED",
+                message=f"Tool '{name}' execution was cancelled by user.",
+                details={},
+            )
+            # Re-raise to let the graph handle it if necessary, 
+            # or just continue if we want the agent to receive the error
+            continue
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
