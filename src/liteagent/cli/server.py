@@ -318,7 +318,7 @@ async def start_server(
             continue
 
         log_event("inspector_started", "server", {"host": host, "port": port})
-        return {"started": True, "host": host, "port": port, "task": task, "reason": ""}
+        return {"started": True, "host": host, "port": port, "task": task, "server": server, "reason": ""}
 
     log_event(
         "inspector_start_failed",

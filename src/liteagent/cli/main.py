@@ -3,9 +3,11 @@ import os
 import typer
 import uuid
 import warnings
+from datetime import datetime
 from typing import Optional
 from rich.prompt import Prompt
 from rich.panel import Panel
+from rich.table import Table
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from ..core.config import settings
@@ -17,6 +19,7 @@ from ..graph.builder import create_graph
 from ..core.logger import start_session_logger, end_session_logger, log_event, log_error
 from .formatter import format_message, format_tool_output, console
 from .server import start_server
+from ..core.session import session_service
 
 # Suppress annoying dependency warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -30,26 +33,92 @@ app = typer.Typer(help="LiteAgent: A lightweight coding agent CLI.")
 
 @app.command()
 def do(
-    task: str = typer.Argument(..., help="The task for the agent to perform."),
+    task: str = typer.Argument(None, help="The task for the agent to perform."),
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use.")
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
+    resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'.")
 ):
     """Run a single task using the agent."""
-    asyncio.run(_run_task(task, provider_name, model))
+    try:
+        asyncio.run(_run_task(task, provider_name, model, resume))
+    except KeyboardInterrupt:
+        pass
 
 @app.command()
 def chat(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use.")
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
+    resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'.")
 ):
     """Open an interactive chat session with the agent."""
-    asyncio.run(_run_chat(provider_name, model))
+    try:
+        asyncio.run(_run_chat(provider_name, model, resume))
+    except KeyboardInterrupt:
+        pass
 
-async def _run_task(task: str, provider_name: str, model: Optional[str]):
+async def _select_session() -> Optional[str]:
+    sessions = session_service.list_sessions()
+    if not sessions:
+        console.print("[yellow]No previous sessions found.[/yellow]")
+        return None
+    
+    table = Table(title="Recent Sessions")
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("Session ID", style="magenta")
+    table.add_column("Last Activity", style="green")
+    
+    for i, s in enumerate(sessions[:10]):
+        dt = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M:%S")
+        table.add_row(str(i+1), s["id"], dt)
+    
+    console.print(table)
+    choice = Prompt.ask("Select a session to resume (enter # or ID)", default="1")
+    
+    if choice.isdigit():
+        idx = int(choice) - 1
+        if 0 <= idx < len(sessions):
+            return sessions[idx]["id"]
+    
+    # Check if choice is an ID
+    for s in sessions:
+        if s["id"] == choice:
+            return s["id"]
+            
+    return None
+
+async def _run_task(task: str, provider_name: str, model: Optional[str], resume: Optional[str]):
+    session_id = None
+    state = None
+    
+    if resume:
+        if resume == "last":
+            sessions = session_service.list_sessions()
+            session_id = sessions[0]["id"] if sessions else None
+        else:
+            session_id = resume
+            
+        if session_id:
+            state = session_service.load_session(session_id)
+            if not state:
+                console.print(f"[red]Error:[/red] Session {session_id} not found.")
+                return
+
+    if not state:
+        if not task:
+            console.print("[red]Error:[/red] task is required when not resuming.")
+            return
+        session_id = str(uuid.uuid4())
+        state = {
+            "messages": [{"role": "user", "content": task}],
+            "plan": "",
+            "tool_outputs": [],
+            "errors": [],
+            "is_complete": False
+        }
+    
     provider = _get_provider(provider_name, model)
-    session_id = str(uuid.uuid4())
     app_state.session_id = session_id
-    app_state.turn_index = 1
+    app_state.turn_index = len([m for m in state["messages"] if m["role"] == "user"])
     app_state.tool_call_count = 0
     app_state.error_count = 0
     app_state.session_log_path = start_session_logger(
@@ -60,19 +129,17 @@ async def _run_task(task: str, provider_name: str, model: Optional[str]):
         cwd=os.getcwd(),
     )
     graph = create_graph(provider)
-    
-    state = {
-        "messages": [{"role": "user", "content": task}],
-        "plan": "",
-        "tool_outputs": [],
-        "errors": [],
-        "is_complete": False
-    }
-    log_event("user_input", "cli", {"content": task}, turn_index=app_state.turn_index)
 
-    console.print(Panel(f"Starting task: {task}", title="LiteAgent", expand=False))
+    if resume:
+        console.print(Panel(f"Resuming session: {session_id}", title="LiteAgent", expand=False))
+        for msg in state["messages"]:
+            format_message(msg)
+    else:
+        console.print(Panel(f"Starting task: {task}", title="LiteAgent", expand=False))
+    
     try:
         await _execute_graph(graph, state, verbose=False)
+        session_service.save_session(session_id, state)
     except Exception as e:
         app_state.error_count += 1
         log_error("cli", e, {"phase": "run_task"}, turn_index=app_state.turn_index)
@@ -85,11 +152,38 @@ async def _run_task(task: str, provider_name: str, model: Optional[str]):
         })
     console.print("\n[bold green]Task processing finished.[/bold green]")
 
-async def _run_chat(provider_name: str, model: Optional[str]):
+async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[str]):
+    session_id = None
+    state = None
+    
+    if resume:
+        if resume == "last":
+            sessions = session_service.list_sessions()
+            session_id = sessions[0]["id"] if sessions else None
+        elif resume == "select":
+            session_id = await _select_session()
+        else:
+            session_id = resume
+            
+        if session_id:
+            state = session_service.load_session(session_id)
+            if not state:
+                console.print(f"[red]Error:[/red] Session {session_id} not found.")
+                return
+
+    if not state:
+        session_id = str(uuid.uuid4())
+        state = {
+            "messages": [],
+            "plan": "",
+            "tool_outputs": [],
+            "errors": [],
+            "is_complete": False
+        }
+
     provider = _get_provider(provider_name, model)
-    session_id = str(uuid.uuid4())
     app_state.session_id = session_id
-    app_state.turn_index = 0
+    app_state.turn_index = len([m for m in state["messages"] if m["role"] == "user"])
     app_state.tool_call_count = 0
     app_state.error_count = 0
     app_state.session_log_path = start_session_logger(
@@ -100,16 +194,13 @@ async def _run_chat(provider_name: str, model: Optional[str]):
         cwd=os.getcwd(),
     )
     graph = create_graph(provider)
-    
-    state = {
-        "messages": [],
-        "plan": "",
-        "tool_outputs": [],
-        "errors": [],
-        "is_complete": False
-    }
 
-    console.print(Panel("Interactive Chat Started. Type 'exit' or 'quit' to end.", title="LiteAgent Chat", expand=False))
+    if resume:
+        console.print(Panel(f"Resuming session: {session_id}", title="LiteAgent Chat", expand=False))
+        for msg in state["messages"]:
+            format_message(msg)
+    else:
+        console.print(Panel("Interactive Chat Started. Type 'exit' or 'quit' to end.", title="LiteAgent Chat", expand=False))
 
     # Start tool inspector with dynamic port fallback
     inspector_info = await start_server(
@@ -118,6 +209,7 @@ async def _run_chat(provider_name: str, model: Optional[str]):
         search_limit=settings.inspector_port_search_limit,
     )
     inspector_task = inspector_info.get("task")
+    inspector_server = inspector_info.get("server")
     if inspector_info.get("started"):
         inspector_url = f"http://{inspector_info['host']}:{inspector_info['port']}"
         console.print(f"[bold cyan]🌐 Tool Inspector running at {inspector_url}[/bold cyan]")
@@ -136,10 +228,13 @@ async def _run_chat(provider_name: str, model: Optional[str]):
         # Refresh the prompt to update the toolbar
         event.app.invalidate()
 
+    @kb.add("escape")
+    def _(event):
+        event.app.exit()
+
     def get_toolbar():
         mode = "AUTO" if app_state.auto_mode else "MANUAL"
-        color = "green" if app_state.auto_mode else "yellow"
-        return f" Mode: {mode} (Shift+Tab to toggle) | exit to quit"
+        return f" Mode: {mode} (Shift+Tab to toggle) | Esc to quit"
 
     session = PromptSession(key_bindings=kb, bottom_toolbar=get_toolbar)
 
@@ -148,40 +243,61 @@ async def _run_chat(provider_name: str, model: Optional[str]):
             try:
                 user_input = await session.prompt_async("\nYou > ")
             except EOFError:
-                log_event("chat_eof", "cli", {}, turn_index=app_state.turn_index)
+                break
+            except KeyboardInterrupt:
+                # Catch interrupt during prompt
                 break
                 
             if user_input.lower() in ["exit", "quit"]:
-                log_event("chat_exit", "cli", {"command": user_input}, turn_index=app_state.turn_index)
                 break
             
             app_state.turn_index += 1
             state["messages"].append({"role": "user", "content": user_input})
             state["is_complete"] = False
             log_event("user_input", "cli", {"content": user_input}, turn_index=app_state.turn_index)
-            
+
+            current_task = None
             try:
-                # Store the task so we can cancel it from an interrupt
                 current_task = asyncio.create_task(_execute_graph(graph, state, verbose=False))
                 state = await current_task
+                session_service.save_session(session_id, state)
             except asyncio.CancelledError:
-                # Task was cancelled, state already updated in _execute_graph
                 pass
             except KeyboardInterrupt:
-                if 'current_task' in locals() and not current_task.done():
+                if current_task and not current_task.done():
                     current_task.cancel()
-                    await asyncio.wait([current_task])
-                console.print("\n[yellow]Interrupted. Returning to prompt...[/yellow]")
+                    try:
+                        await asyncio.wait([current_task], timeout=1)
+                    except:
+                        pass
+                console.print("\n[yellow]Interrupted. Session saved.[/yellow]")
             except Exception as e:
                 app_state.error_count += 1
                 log_error("cli", e, {"phase": "chat_loop"}, turn_index=app_state.turn_index)
-                raise
+                console.print(f"[red]Error:[/red] {type(e).__name__}: {e}")
+                console.print("[yellow]You can try again or type 'exit' to quit.[/yellow]")
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
     finally:
+        console.print("\n[bold yellow]Exiting LiteAgent...[/bold yellow]")
+        if current_task and not current_task.done():
+            current_task.cancel()
+            try:
+                await asyncio.wait([current_task], timeout=0.5)
+            except:
+                pass
+        if inspector_server and inspector_task and not inspector_task.done():
+            try:
+                await asyncio.wait_for(inspector_server.shutdown(), timeout=1.0)
+            except Exception:
+                pass
+        
         end_session_logger({
             "turn_count": app_state.turn_index,
             "tool_call_count": app_state.tool_call_count,
             "error_count": app_state.error_count,
         })
+        console.print(f"Session saved. To resume: [bold cyan]liteagent chat --resume {session_id}[/bold cyan]")
 
 def _get_provider(provider_name: str, model: Optional[str]):
     if provider_name == "ollama":

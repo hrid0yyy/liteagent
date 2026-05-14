@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     log_verbose_raw: bool = True
     log_dir: str = str(Path.home() / ".liteagent")
     log_max_payload_chars: int = 500000
+    session_dir: str = str(Path.home() / ".liteagent" / "sessions")
 
     # Tool inspector server
     inspector_enabled: bool = True

@@ -56,8 +56,7 @@ def format_message(message: dict, show_thinking: bool = True):
     tool_calls = message.get("tool_calls", [])
     
     if role == "user":
-        # Handled in main.py loop for chat
-        pass
+        console.print(f"\n[bold blue]You:[/bold blue] {content}")
         
     elif role == "assistant":
         # Content in assistant message often represents reasoning/thinking

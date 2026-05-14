@@ -56,6 +56,12 @@ async def run_shell_command(
             except:
                 pass
             return f"Error: Command timed out after {timeout} seconds."
+        except asyncio.CancelledError:
+            try:
+                process.kill()
+            except:
+                pass
+            raise # Re-raise to let the executor handle it
 
         output = []
         output.append(f"Exit Code: {return_code}")
