@@ -87,87 +87,47 @@ def delete_path(path_to_delete: str) -> str:
         return f"Error deleting {path_to_delete}: {str(e)}"
 
 
-def modify_file(edits: str) -> str:
+def modify_file(file_path: str, edits: str) -> str:
     """
-    Applies batch edits across files using custom markers.
+    Applies batch edits to a file using SEARCH/REPLACE blocks.
     Format:
-    >>> BEGIN
-    >>> FILE : path/to/file.py
     >>> SEARCH
     old code
     +++ REPLACE
     new code
-    >>> END
     """
-    if ">>> BEGIN" not in edits or ">>> END" not in edits:
-        return "Error: Missing >>> BEGIN or >>> END markers."
+    path = Path(file_path)
+    if not path.exists():
+        return f"Error: File {file_path} does not exist."
 
     try:
-        content = edits.split(">>> BEGIN")[1].split(">>> END")[0].strip()
-    except IndexError:
-        return "Error: Could not parse content between >>> BEGIN and >>> END."
+        original_content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Error reading {file_path}: {str(e)}"
 
-    file_blocks = content.split(">>> FILE : ")
-    operations = []
-    errors = []
-
-    for block in file_blocks:
-        if not block.strip():
-            continue
-
-        lines = block.splitlines()
-        file_path = lines[0].strip()
-        file_content_block = "\n".join(lines[1:])
-        path = Path(file_path)
-
-        if not path.exists():
-            errors.append(f"Error: File {file_path} does not exist.")
-            continue
-
-        pairs = []
-        search_parts = file_content_block.split(">>> SEARCH")
-        for part in search_parts:
-            if "+++ REPLACE" in part:
-                sub_parts = part.split("+++ REPLACE")
-                search_str = sub_parts[0].strip("\r\n")
-                replace_str = sub_parts[1].strip("\r\n")
+    # Parse SEARCH/REPLACE pairs
+    pairs = []
+    # Split by >>> SEARCH but skip the first empty part if it exists
+    parts = edits.split(">>> SEARCH")
+    for part in parts:
+        if "+++ REPLACE" in part:
+            sub_parts = part.split("+++ REPLACE")
+            search_str = sub_parts[0].strip("\r\n")
+            replace_str = sub_parts[1].strip("\r\n")
+            if search_str:
                 pairs.append((search_str, replace_str))
 
-        if not pairs:
-            errors.append(f"Warning: No valid SEARCH/REPLACE pairs found for {file_path}")
-            continue
+    if not pairs:
+        return f"Error: No valid SEARCH/REPLACE pairs found for {file_path}"
 
-        operations.append({"file_path": file_path, "path": path, "pairs": pairs})
+    current_content = original_content
 
-    if errors:
-        return "\n".join(errors)
-
-    original_contents = {}
-    working_contents = {}
-    edits_per_file = {}
-
-    for op in operations:
-        file_path = op["file_path"]
-        path = op["path"]
-        if file_path in original_contents:
-            continue
-        try:
-            original = path.read_text(encoding="utf-8")
-        except Exception as e:
-            return f"Error modifying {file_path}: {str(e)}"
-        original_contents[file_path] = original
-        working_contents[file_path] = original
-        edits_per_file[file_path] = 0
-
-    def apply_one(current_content: str, file_path: str, search_string: str, replace_string: str):
+    def apply_one(content: str, search_string: str, replace_string: str):
         search_lines = search_string.splitlines()
-        if not search_lines:
-            return None, f"Error in {file_path}: search_string is empty."
-
-        current_file_lines = current_content.splitlines()
+        current_file_lines = content.splitlines()
         replace_lines = replace_string.splitlines()
 
-        # 1) Strict line/block matching first (prevents substring edits like "1" inside "10")
+        # 1) Strict line/block matching
         exact_match_start = -1
         exact_matches_found = 0
         for i in range(len(current_file_lines) - len(search_lines) + 1):
@@ -183,7 +143,7 @@ def modify_file(edits: str) -> str:
             return "\n".join(new_lines), None
 
         if exact_matches_found > 1:
-            return None, f"Error in {file_path}: Found {exact_matches_found} exact matches for a search block."
+            return None, f"Error: Found {exact_matches_found} exact matches for a search block."
 
         # 2) Easy-going matching: allow indentation/whitespace differences
         def lines_match(f_line, s_line):
@@ -200,11 +160,10 @@ def modify_file(edits: str) -> str:
 
         if matches_found != 1:
             if matches_found > 1:
-                return None, f"Error in {file_path}: Found {matches_found} similar matches for a search block."
-            return None, f"Error in {file_path}: Could not find match for search block."
+                return None, f"Error: Found {matches_found} similar matches for a search block."
+            return None, f"Error: Could not find match for search block."
 
         new_lines = current_file_lines[:best_match_start]
-
         orig_first_line = current_file_lines[best_match_start]
         indent = re.match(r'^([ \t]*)', orig_first_line).group(1)
 
@@ -222,26 +181,24 @@ def modify_file(edits: str) -> str:
         new_lines.extend(current_file_lines[best_match_start + len(search_lines):])
         return "\n".join(new_lines), None
 
-    for op in operations:
-        file_path = op["file_path"]
-        temp_content = working_contents[file_path]
-        for search_string, replace_string in op["pairs"]:
-            updated, error = apply_one(temp_content, file_path, search_string, replace_string)
-            if error:
-                return error
-            temp_content = updated
-            edits_per_file[file_path] += 1
-        working_contents[file_path] = temp_content
+    # Apply all pairs
+    for search_str, replace_str in pairs:
+        updated, error = apply_one(current_content, search_str, replace_str)
+        if error:
+            return f"Error in {file_path}: {error}"
+        current_content = updated
 
-    results = []
-    for file_path, original_content in original_contents.items():
-        temp_content = working_contents[file_path]
-        if original_content.endswith("\n") and not temp_content.endswith("\n"):
-            temp_content += "\n"
-        if temp_content != original_content:
-            Path(file_path).write_text(temp_content, encoding="utf-8")
-        results.append(f"Successfully applied {edits_per_file[file_path]} edit(s) to {file_path}")
+    # Handle trailing newline consistency
+    if original_content.endswith("\n") and not current_content.endswith("\n"):
+        current_content += "\n"
 
-    return "\n".join(results)
+    if current_content != original_content:
+        try:
+            path.write_text(current_content, encoding="utf-8")
+            return f"Successfully applied {len(pairs)} edit(s) to {file_path}"
+        except Exception as e:
+            return f"Error writing to {file_path}: {str(e)}"
+    
+    return f"No changes made to {file_path} (content already matches)."
 
 

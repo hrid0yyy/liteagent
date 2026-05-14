@@ -34,7 +34,8 @@ SAMPLE_INPUTS = {
         "path_to_delete": "obsolete_folder"
     },
     "modify_file": {
-        "edits": ">>> BEGIN\n>>> FILE : example.py\n>>> SEARCH\nold code\n+++ REPLACE\nnew code\n>>> END"
+        "file_path": "example.py",
+        "edits": ">>> SEARCH\nold code\n+++ REPLACE\nnew code"
     },
     "run_shell_command": {
         "command": "dir",

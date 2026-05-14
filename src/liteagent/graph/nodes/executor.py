@@ -17,18 +17,8 @@ def _extract_paths_for_diff(tool_name: str, args: Dict[str, Any]) -> List[str]:
         return [file_path] if isinstance(file_path, str) and file_path.strip() else []
 
     if tool_name == "modify_file":
-        edits = args.get("edits", "")
-        if not isinstance(edits, str):
-            return []
-        paths = []
-        for block in edits.split(">>> FILE : ")[1:]:
-            lines = block.splitlines()
-            if not lines:
-                continue
-            file_path = lines[0].strip()
-            if file_path:
-                paths.append(file_path)
-        return list(dict.fromkeys(paths))
+        file_path = args.get("file_path")
+        return [file_path] if isinstance(file_path, str) and file_path.strip() else []
 
     return []
 
