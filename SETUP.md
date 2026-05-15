@@ -64,7 +64,8 @@ liteagent do "Create a summary of all .md files in this project"
 ### 2. Interactive Chat Mode
 Use the `chat` command for a multi-turn conversation:
 ```bash
-liteagent chat --provider ollama -m qwen3.5:2b --crg
+liteagent chat --provider nvidia -m minimaxai/minimax-m2.7 --crg
+liteagent chat --provider nvidia -m minimaxai/minimax-m2.7 
 ```
 
 ### Options:

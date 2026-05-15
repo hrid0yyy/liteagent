@@ -2,10 +2,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.live import Live
 from rich.text import Text
+from rich.markdown import Markdown
+from rich.box import SIMPLE
 from typing import Optional
 from pathlib import Path
-
-from .markdown_renderer import render_markdown
 
 console = Console()
 
@@ -118,7 +118,13 @@ def format_message(message: dict, show_thinking: bool = True):
         
         # If it's a final answer (no tools)
         if content and not tool_calls:
-            console.print(f"[bold green]Agent:[/bold green] {content}")
+            console.print(Panel(
+                Markdown(content),
+                title="[bold green]Agent[/bold green]",
+                border_style="green",
+                box=SIMPLE,
+                expand=False
+            ))
             
     elif role == "tool":
         # Raw tool output hidden to keep chat clean
@@ -133,10 +139,6 @@ def format_tool_output(tool_output: dict):
     for item in diffs:
         path = item.get("path", "unknown")
         diff = item.get("diff", "")
-
-        if Path(path).suffix.lower() == ".md":
-            render_markdown(path)
-            continue
 
         if not diff:
             continue
