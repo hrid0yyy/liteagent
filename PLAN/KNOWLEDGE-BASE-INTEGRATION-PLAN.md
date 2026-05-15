@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     crg_auto_build: bool = True                  # Build graph on session start if not exists
     crg_check_hash_before_turn: bool = True      # Check hash before each agent turn
     crg_update_async: bool = True                # Update without blocking agent
-    crg_wiki_dir: str = ".code-review-wiki"      # Wiki output directory
+    crg_wiki_dir: str = ".code-review-graph/wiki"  # Wiki output directory
     crg_context_max_chars: int = 50000           # Max characters for KB context
     crg_include_sections: List[str] = [          # Which wiki sections to include
         "architecture",
@@ -928,7 +928,7 @@ Turn 2 (Codebase changed, KB updated):
 | `crg_auto_build` | bool | True | Auto-build graph on start |
 | `crg_check_hash_before_turn` | bool | True | Check hash before each turn |
 | `crg_update_async` | bool | True | Update without blocking |
-| `crg_wiki_dir` | str | ".code-review-wiki" | Wiki output directory |
+| `crg_wiki_dir` | str | ".code-review-graph/wiki" | Wiki output directory |
 | `crg_context_max_chars` | int | 50000 | Max context size |
 | `crg_include_sections` | List[str] | [...] | Wiki sections to include |
 
@@ -952,6 +952,86 @@ liteagent chat --resume last --crg
 
 ---
 
+## Implementation Updates
+
+### Auto-Build Improvements
+
+The `initialize()` method now checks for multiple conditions before deciding to build:
+
+| Condition | Action |
+|-----------|--------|
+| `.code-review-graph/` folder missing | Build graph |
+| Wiki folder missing or empty | Generate wiki |
+| Graph has 0 nodes | Build graph |
+| Graph has 0 files indexed | Build graph |
+| Status shows "not built" | Build graph |
+| Status shows "never" updated | Build graph |
+
+### Comprehensive Logging Events
+
+All KB operations are logged to the session log file (`~/.liteagent/<session_id>.log`):
+
+| Event | When | Data Logged |
+|-------|------|-------------|
+| `knowledge_base_init_start` | KB initialization starts | project_path, wiki_dir |
+| `knowledge_base_init_success` | KB initialized successfully | nodes, edges, files, wiki_files, context_length, initial_hash |
+| `knowledge_base_init_failed` | KB initialization fails | error, error_type |
+| `knowledge_base_status_check` | Graph status checked | graph_folder_exists, wiki_folder_exists, nodes, edges, files |
+| `knowledge_base_build_start` | Build starts | reason |
+| `knowledge_base_build_end` | Build completes | build_output |
+| `knowledge_base_wiki_start` | Wiki generation starts | reason |
+| `knowledge_base_wiki_end` | Wiki generation ends | wiki_output |
+| `knowledge_base_hash_unchanged` | Hash same, no update needed | hash, update_needed: false |
+| `knowledge_base_hash_changed` | Hash changed, update needed | old_hash, new_hash, update_needed: true |
+| `knowledge_base_update_start` | Update starts | - |
+| `knowledge_base_update_success` | Update succeeds | nodes, edges, files, wiki_files, context_length |
+| `knowledge_base_update_failed` | Update fails | error, error_type |
+| `crg_command_start` | CRG command starts | command |
+| `crg_command_success` | CRG command succeeds | command, output_length |
+| `crg_command_error` | CRG command fails | command, error, returncode |
+
+### Log File Location
+
+Session logs are saved to:
+```
+~/.liteagent/<session_id>.log
+```
+
+Example: `C:\Users\<username>\.liteagent\46a4a477-3cb3-431f-85a9-d896824dbb55.log`
+
+---
+
+## Known Issues
+
+### 1. Tool Calling May Fail with Large KB Context
+
+**Problem**: When using smaller models (e.g., `qwen3.5:2b`) with a large knowledge base context, the model may fail to make proper tool calls. Instead, it outputs tool names as plain text.
+
+**Symptoms**:
+- Agent says it will call a tool but nothing happens
+- Tool names appear as text in the response instead of actual tool calls
+- Session ends without any tool execution
+
+**Workarounds**:
+1. Reduce KB context size in `.env`:
+   ```
+   CRG_CONTEXT_MAX_CHARS=10000
+   ```
+
+2. Use a larger/better model:
+   ```bash
+   liteagent chat --provider ollama -m llama3.2 --crg
+   ```
+
+3. Disable KB if tool calling issues persist:
+   ```bash
+   liteagent chat  # without --crg
+   ```
+
+**Status**: Under investigation. May need to restructure how KB context is injected into the system prompt.
+
+---
+
 ## Future Enhancements
 
 1. **Selective Loading**: Load only relevant wiki sections based on task
@@ -959,3 +1039,4 @@ liteagent chat --resume last --crg
 3. **Incremental Context**: Update context incrementally instead of full reload
 4. **Multi-Project Support**: Handle multiple project knowledge bases
 5. **Custom Wiki Templates**: Allow custom wiki generation templates
+6. **Smart Context Sizing**: Automatically adjust KB context size based on model capabilities

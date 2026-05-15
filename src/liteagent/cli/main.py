@@ -20,6 +20,7 @@ from ..core.logger import start_session_logger, end_session_logger, log_event, l
 from .formatter import format_message, format_tool_output, console
 from .server import start_server
 from ..core.session import session_service
+from ..knowledge.manager import WikiKnowledgeManager, set_knowledge_manager
 
 # Suppress annoying dependency warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -37,11 +38,12 @@ def do(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
     resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
-    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector."),
+    crg: bool = typer.Option(False, "--crg", help="Enable code-review-graph knowledge base.")
 ):
     """Run a single task using the agent."""
     try:
-        asyncio.run(_run_task(task, provider_name, model, resume, inspector))
+        asyncio.run(_run_task(task, provider_name, model, resume, inspector, crg))
     except KeyboardInterrupt:
         pass
 
@@ -50,11 +52,12 @@ def chat(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
     resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
-    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector."),
+    crg: bool = typer.Option(False, "--crg", help="Enable code-review-graph knowledge base.")
 ):
     """Open an interactive chat session with the agent."""
     try:
-        asyncio.run(_run_chat(provider_name, model, resume, inspector))
+        asyncio.run(_run_chat(provider_name, model, resume, inspector, crg))
     except KeyboardInterrupt:
         pass
 
@@ -88,7 +91,7 @@ async def _select_session() -> Optional[str]:
             
     return None
 
-async def _run_task(task: str, provider_name: str, model: Optional[str], resume: Optional[str], inspector: bool = True):
+async def _run_task(task: str, provider_name: str, model: Optional[str], resume: Optional[str], inspector: bool = True, crg: bool = False):
     session_id = None
     state = None
     
@@ -117,6 +120,17 @@ async def _run_task(task: str, provider_name: str, model: Optional[str], resume:
             "errors": [],
             "is_complete": False
         }
+    
+    # Initialize knowledge base if CRG enabled
+    knowledge_manager = None
+    if crg or settings.crg_enabled:
+        knowledge_manager = WikiKnowledgeManager()
+        initialized = await knowledge_manager.initialize()
+        if initialized:
+            set_knowledge_manager(knowledge_manager)
+            console.print("[bold green]Knowledge base loaded successfully.[/bold green]")
+        else:
+            console.print("[bold yellow]Warning: Knowledge base initialization failed. Continuing without KB.[/bold yellow]")
     
     provider = _get_provider(provider_name, model)
     app_state.session_id = session_id
@@ -154,7 +168,7 @@ async def _run_task(task: str, provider_name: str, model: Optional[str], resume:
         })
     console.print("\n[bold green]Task processing finished.[/bold green]")
 
-async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[str], inspector: bool = True):
+async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[str], inspector: bool = True, crg: bool = False):
     session_id = None
     state = None
     
@@ -182,6 +196,17 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
             "errors": [],
             "is_complete": False
         }
+
+    # Initialize knowledge base if CRG enabled
+    knowledge_manager = None
+    if crg or settings.crg_enabled:
+        knowledge_manager = WikiKnowledgeManager()
+        initialized = await knowledge_manager.initialize()
+        if initialized:
+            set_knowledge_manager(knowledge_manager)
+            console.print("[bold green]Knowledge base loaded successfully.[/bold green]")
+        else:
+            console.print("[bold yellow]Warning: Knowledge base initialization failed. Continuing without KB.[/bold yellow]")
 
     provider = _get_provider(provider_name, model)
     app_state.session_id = session_id

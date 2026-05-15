@@ -10,6 +10,12 @@ class AppState:
         self.turn_index: int = 0
         self.tool_call_count: int = 0
         self.error_count: int = 0
+        
+        # Knowledge Base
+        self.knowledge_base: str = ""
+        self.knowledge_base_loaded: bool = False
+        self.knowledge_base_hash: str = ""  # Hash of current KB content
+        self.codebase_hash: str = ""        # Hash of codebase files
 
 app_state = AppState()
 

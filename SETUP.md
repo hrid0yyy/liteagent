@@ -42,7 +42,7 @@ Welcome to **LiteAgent**, a lightweight, extensible coding agent CLI built with 
 
    **Windows PowerShell:**
    ```powershell
-   [Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\path\to\liteagent\.venv\Scripts", "User")
+   [Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Users\sm.mahbub\Desktop\CA\liteagent\.venv\Scripts", "User")
    ```
    *(Note: Replace `C:\path\to\liteagent` with your actual project path. Restart your terminal after running this.)*
 
@@ -64,7 +64,7 @@ liteagent do "Create a summary of all .md files in this project"
 ### 2. Interactive Chat Mode
 Use the `chat` command for a multi-turn conversation:
 ```bash
-liteagent chat --provider nvidia
+liteagent chat --provider ollama -m qwen3.5:2b --crg
 ```
 
 ### Options:
