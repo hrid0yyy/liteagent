@@ -48,4 +48,20 @@ class Settings(BaseSettings):
         "flows"
     ]
 
+    # MCP Settings
+    mcp_config_path: str = "mcp_servers.json"
+
+    def get_mcp_servers(self) -> dict:
+        import json
+        path = Path(self.mcp_config_path)
+        if not path.exists():
+            return {}
+        try:
+            with open(path, "r") as f:
+                config = json.load(f)
+                return config.get("mcpServers", {})
+        except Exception as e:
+            print(f"Error loading MCP config: {e}")
+            return {}
+
 settings = Settings()

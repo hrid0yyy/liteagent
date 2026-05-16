@@ -21,6 +21,50 @@ from .formatter import format_message, format_tool_output, console
 from .server import start_server
 from ..core.session import session_service
 from ..knowledge.manager import WikiKnowledgeManager, set_knowledge_manager
+from ..tools.mcp_manager import mcp_manager
+from ..tools.registry import registry
+import inspect
+
+async def _init_mcp():
+    mcp_servers = settings.get_mcp_servers()
+    if not mcp_servers:
+        return
+
+    console.print(f"[bold cyan]Initializing {len(mcp_servers)} MCP servers...[/bold cyan]")
+    for name, config in mcp_servers.items():
+        success = await mcp_manager.connect_to_server(name, config)
+        if success:
+            console.print(f"[green]  - Connected to {name}[/green]")
+        else:
+            console.print(f"[red]  - Failed to connect to {name}[/red]")
+
+    # Register tools discovered by MCP manager
+    for internal_name, metadata in mcp_manager.tools_metadata.items():
+        # Create a closure for the tool call
+        async def mcp_tool_wrapper(**args):
+            return await mcp_manager.call_tool(internal_name, args)
+        
+        # We need to give it a name and docstring for the registry
+        mcp_tool_wrapper.__name__ = internal_name
+        mcp_tool_wrapper.__doc__ = metadata["schema"].get("description", "")
+        
+        # Dynamically create a signature so validation in executor.py works
+        try:
+            params = []
+            mcp_params = metadata["schema"].get("parameters", {}).get("properties", {})
+            required = metadata["schema"].get("parameters", {}).get("required", [])
+            
+            for p_name in mcp_params.keys():
+                default = inspect.Parameter.empty if p_name in required else None
+                params.append(inspect.Parameter(p_name, inspect.Parameter.KEYWORD_ONLY, default=default))
+            
+            mcp_tool_wrapper.__signature__ = inspect.Signature(params)
+        except Exception as e:
+            log_event("mcp_sig_error", "cli", {"tool": internal_name, "error": str(e)}, level="warn")
+
+        registry.register_external_tool(internal_name, metadata["schema"], mcp_tool_wrapper)
+        console.print(f"[blue]    - Registered tool: {internal_name}[/blue]")
+
 
 # Suppress annoying dependency warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -43,7 +87,14 @@ def do(
 ):
     """Run a single task using the agent."""
     try:
-        asyncio.run(_run_task(task, provider_name, model, resume, inspector, crg))
+        async def main():
+            await _init_mcp()
+            try:
+                await _run_task(task, provider_name, model, resume, inspector, crg)
+            finally:
+                await mcp_manager.shutdown()
+        
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
 
@@ -57,7 +108,14 @@ def chat(
 ):
     """Open an interactive chat session with the agent."""
     try:
-        asyncio.run(_run_chat(provider_name, model, resume, inspector, crg))
+        async def main():
+            await _init_mcp()
+            try:
+                await _run_chat(provider_name, model, resume, inspector, crg)
+            finally:
+                await mcp_manager.shutdown()
+                
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
 

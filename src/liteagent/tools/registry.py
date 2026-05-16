@@ -48,6 +48,13 @@ class ToolRegistry:
         self.tools: Dict[str, Callable] = {}
         self.schemas: List[Dict[str, Any]] = []
 
+    def register_external_tool(self, name: str, schema: Dict[str, Any], func: Callable):
+        """Registers a tool with a pre-defined schema (e.g., from MCP)."""
+        self.tools[name] = func
+        # Ensure the schema has the correct name if it was modified
+        schema["name"] = name
+        self.schemas.append(schema)
+
     def register(self, func: Callable):
         name = func.__name__
         self.tools[name] = func

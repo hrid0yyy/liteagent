@@ -157,3 +157,6 @@ cython_debug/
 
 # macOS
 .DS_Store
+
+plan/
+.code-review-graph/
