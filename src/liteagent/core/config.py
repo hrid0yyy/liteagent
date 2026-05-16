@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+from typing import Optional, List
 
 class Settings(BaseSettings):
     # Search in current directory, then in ~/.liteagent/.env
@@ -32,5 +32,20 @@ class Settings(BaseSettings):
     inspector_host: str = "127.0.0.1"
     inspector_port: int = 8000
     inspector_port_search_limit: int = 100
+
+    # Code Review Graph - Knowledge Base Settings
+    crg_enabled: bool = False                    # Enable knowledge base feature
+    crg_auto_build: bool = True                  # Build graph on session start if not exists
+    crg_check_hash_before_turn: bool = True      # Check hash before each agent turn
+    crg_update_async: bool = True                # Update without blocking agent
+    crg_wiki_dir: str = ".code-review-graph/wiki"  # Wiki output directory
+    crg_context_max_chars: int = 50000           # Max characters for KB context
+    crg_include_sections: List[str] = [          # Which wiki sections to include
+        "architecture",
+        "communities", 
+        "hubs",
+        "bridges",
+        "flows"
+    ]
 
 settings = Settings()
