@@ -48,6 +48,19 @@ class Settings(BaseSettings):
         "flows"
     ]
 
+    # Summarizer Node Settings
+    summarizer_enabled: bool = True
+    summarizer_provider: str = "openrouter"
+    summarizer_model: str = "openai/gpt-oss-120b:free"
+    summarizer_threshold: int = 4000
+    summarize_tools: List[str] = [
+        "code-review-graph__explore_codebase_tool",
+        "code-review-graph__find_code_tool",
+        "code-review-graph__review_changes_composite_tool",
+        "code-review-graph__query_graph_tool",
+        "code-review-graph__refactor_tool"
+    ]
+
     # MCP Settings
     mcp_config_path: str = "mcp_servers.json"
 
