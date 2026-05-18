@@ -7,6 +7,9 @@ A lightweight, extensible coding agent CLI built with Python and LangGraph.
 - **High Efficiency**: Surgical file operations and workspace exploration.
 - **Provider Agnostic**: Supports Ollama and NVIDIA NIM.
 - **LangGraph Workflow**: Plan-Execute-Review cycle for reliable results.
+- **Model Context Protocol (MCP)**: Extensible capabilities via external MCP servers (see `MCP-USAGE.md`).
+- **Knowledge Base Integration**: Context-aware project wiki integration to automatically inform the agent.
+- **Universal Tool Summarizer**: Dual-model architecture that intelligently compresses large tool payloads to save context tokens.
 
 ## Installation
 1. Clone the repository.
