@@ -11,8 +11,9 @@ Think of the Insight Agent as a senior engineer who has instantly read every lin
 ### Key Deliverables
 1. **Instant Codebase Understanding**: Drop the agent into any project folder (Python, C#, Javascript, etc.), and it instantly learns how the entire app is wired together.
 2. **The "Log Detective"**: It reads massive, gigabyte-sized server log files in milliseconds, groups similar errors together, and highlights anomalies.
-3. **Connecting Logs to Code**: If the app crashes, the agent can trace the error from the log file *directly* back to the exact line of code that caused it.
-4. **Visual Flowcharts**: It can automatically draw visual maps (flowcharts) explaining how complex features work behind the scenes.
+3. **Remote Debugging (Zero Setup)**: It natively supports Windows Network Sharing. You can point it at logs on a remote device (like `\\192.168.1.50\Logs`) and it will read them over the network as if they were on your own PC.
+4. **Connecting Logs to Code**: If the app crashes, the agent can trace the error from the log file *directly* back to the exact line of code that caused it.
+5. **Visual Flowcharts**: It can automatically draw visual maps (flowcharts) explaining how complex features work behind the scenes.
 
 ### Real-World Scenario: "The 3 AM Server Crash"
 
@@ -1078,7 +1079,7 @@ class InsightAgent:
 
 ### New Agent Tools Specification
 
-These 12 new tools are injected into the agent's LangGraph configuration. They are internal functions (not MCP) to maximize speed and reliability.
+These 9 new tools are injected into the agent's LangGraph configuration. They are internal functions (not MCP) to maximize speed and reliability.
 
 #### Code & Architecture Investigation
 1. **`search_code`**
@@ -1088,37 +1089,28 @@ These 12 new tools are injected into the agent's LangGraph configuration. They a
    - **Parameters:** `name: str`
    - **Scope:** Directly queries the SQLite Knowledge Graph for a specific class, function, or variable. Returns exact file paths, line numbers, and docstrings.
 3. **`trace_calls`**
-   - **Parameters:** `symbol: str`, `direction: str = "both"`, `depth: int = 3`
-   - **Scope:** Traverses the AST call graph. `"callers"` shows what uses the symbol; `"callees"` shows what the symbol uses.
-4. **`get_dependents`**
-   - **Parameters:** `symbol: str`
-   - **Scope:** Finds all files, classes, or modules that import or rely on a specific piece of code.
-5. **`get_class_hierarchy`**
+   - **Parameters:** `symbol: str`, `direction: str = "both"`, `depth: int = 3`, `max_nodes: int = 50`
+   - **Scope:** Traverses the AST call graph. `"callers"` shows what relies on or uses the symbol (acting as a "get dependents" tool); `"callees"` shows what the symbol uses. **Safety:** Enforces a hard budget (`max_nodes=50`) to prevent exponential tree explosion.
+4. **`get_class_hierarchy`**
    - **Parameters:** `class_name: str`
    - **Scope:** Queries AST inheritance records to build a tree of parent and child classes (highly useful for C# and Java OOP structures).
-6. **`get_project_map`**
-   - **Parameters:** None
-   - **Scope:** Returns a high-level folder/module overview of the repository to orient the agent.
+5. **`get_project_map`**
+   - **Parameters:** `path: str = "."`
+   - **Scope:** Returns a folder/module overview. **Safety:** Uses Progressive Disclosure. It strictly returns only Depth-1 of the requested `path` (no deep recursion). The agent must explicitly request sub-folders to drill down.
 
 #### Log Analytics & Debugging
-7. **`analyze_logs`**
-   - **Parameters:** `path: str = "auto"`, `level: str = "all"`, `last_n: int = 1000`, `query: str = None`
-   - **Scope:** Parses large log files and summarizes trends. `"auto"` automatically discovers logs in the project directory and `insight_log_paths`.
-8. **`search_logs`**
+6. **`search_logs`**
    - **Parameters:** `query: str`, `is_plain: bool = True`, `level: str = None`, `last_hours: int = None`, `error_code: str = None`, `limit: int = 50`
    - **Scope:** Queries the SQLite FTS5 log index. Use `is_plain=True` for instant keyword/error code lookup. Use `is_plain=False` to execute Python Regex directly against raw log lines (slower but highly flexible).
-9. **`trace_error_to_code`**
+7. **`trace_error_to_code`**
    - **Parameters:** `error_string: str`
    - **Scope:** The bridging tool. Given a log error, it searches logs for stack traces. If none exist, it cross-references the error string with the AST `logged_errors` index to find exactly which C#/Python function threw the error, returning the full execution context.
-10. **`get_log_errors`**
-    - **Parameters:** `path: str = "auto"`, `last_hours: int = 24`
-    - **Scope:** Groups and de-duplicates all recent `[ERROR]` or `[FATAL]` logs to find spikes or anomalies.
-11. **`get_error_code_stats`**
-    - **Parameters:** None
-    - **Scope:** Returns aggregate statistics (count, first seen, last seen) for formal error codes (like `HTTP_500` or `ERR_1001`) automatically extracted during indexing.
+8. **`get_log_errors`**
+    - **Parameters:** `path: str = "auto"`, `last_hours: int = 24`, `include_stats: bool = True`
+    - **Scope:** Groups and de-duplicates all recent `[ERROR]` or `[FATAL]` logs. If `include_stats=True`, it also returns aggregate statistics for formal error codes (e.g. `HTTP_500: 42 occurrences`). **Safety:** Uses Auto-Aggregation. If >50 unique errors are found, it skips returning raw traces and instead returns a compressed statistical summary.
 
 #### Execution Workflow
-12. **`trace_workflow`**
+9. **`trace_workflow`**
     - **Parameters:** `entry_point: str`, `max_depth: int = 5`
     - **Scope:** Follows the execution path from a specific entry point (like a controller method) and generates a Markdown Mermaid flowchart diagram of the logic.
 
@@ -1134,7 +1126,7 @@ When answering questions:
 1. ALWAYS use your tools to ground answers in actual code — never guess
 2. For "how does X work" questions → use search_code + trace_calls + read_file
 3. For "show me the flow" questions → use trace_workflow to generate diagrams
-4. For log analysis → use analyze_logs with appropriate filters
+4. For log analysis → use get_log_errors to find anomalies and search_logs for specific traces
 5. For log search → use search_logs:
    - is_plain=True (default) for keywords, error codes, exact phrases
    - is_plain=False for regex patterns like 'user_id=\d+ failed' or 'took \d{4,}ms'
@@ -1199,7 +1191,8 @@ insight_log_paths: list[str] = []  # External log directories/globs to scan
                                    # Examples:
                                    #   ["/var/log/myapp", "/var/log/nginx/access.log"]
                                    #   ["D:\\Logs\\MyService", "D:\\Logs\\MyService\\*.log"]
-                                   # Accepts: absolute dirs, absolute file paths, glob patterns
+                                   #   ["\\\\192.168.1.50\\SharedLogs\\*.log"]  # Remote Windows Device (UNC Path)
+                                   # Accepts: absolute dirs, absolute file paths, glob patterns, and UNC network paths
                                    # These are scanned IN ADDITION to the project directory
 ```
 
