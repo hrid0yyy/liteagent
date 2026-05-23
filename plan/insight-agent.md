@@ -76,12 +76,12 @@ graph TD
 
     subgraph "Agent Tools (Internal)"
         B --> T1["search_code(query)"]
-        B --> T2["get_symbol(name)"]
+        B --> T2["get_symbol(name) [FOR FUTURE]"]
         B --> T3["trace_calls(fn_name, direction)"]
-        B --> T4["get_dependents(symbol)"]
+        B --> T4["get_dependents(symbol) [FOR FUTURE]"]
         B --> T5["analyze_logs(path, filters)"]
         B --> T6["get_log_summary(path)"]
-        B --> T7["trace_workflow(entry_point)"]
+        B --> T7["trace_workflow(entry_point) [FOR FUTURE]"]
         B --> T8["get_project_map()"]
         B --> T9["read_file(path, lines)"]
         B --> T10["search_in_files(pattern)"]
@@ -1085,13 +1085,13 @@ These 9 new tools are injected into the agent's LangGraph configuration. They ar
 1. **`search_code`**
    - **Parameters:** `query: str`, `top_k: int = 8`
    - **Scope:** Performs a hybrid vector + BM25 keyword search across the entire AST-indexed codebase. Ideal for finding logic without knowing exact file names.
-2. **`get_symbol`**
+2. **`get_symbol`** [FOR FUTURE] no need to implement these now!
    - **Parameters:** `name: str`
    - **Scope:** Directly queries the SQLite Knowledge Graph for a specific class, function, or variable. Returns exact file paths, line numbers, and docstrings.
 3. **`trace_calls`**
    - **Parameters:** `symbol: str`, `direction: str = "both"`, `depth: int = 3`, `max_nodes: int = 50`
    - **Scope:** Traverses the AST call graph. `"callers"` shows what relies on or uses the symbol (acting as a "get dependents" tool); `"callees"` shows what the symbol uses. **Safety:** Enforces a hard budget (`max_nodes=50`) to prevent exponential tree explosion.
-4. **`get_class_hierarchy`**
+4. **`get_class_hierarchy`** [FOR FUTURE] no need to implement these now!
    - **Parameters:** `class_name: str`
    - **Scope:** Queries AST inheritance records to build a tree of parent and child classes (highly useful for C# and Java OOP structures).
 5. **`get_project_map`**
@@ -1110,7 +1110,7 @@ These 9 new tools are injected into the agent's LangGraph configuration. They ar
     - **Scope:** Groups and de-duplicates all recent `[ERROR]` or `[FATAL]` logs. If `include_stats=True`, it also returns aggregate statistics for formal error codes (e.g. `HTTP_500: 42 occurrences`). **Safety:** Uses Auto-Aggregation. If >50 unique errors are found, it skips returning raw traces and instead returns a compressed statistical summary.
 
 #### Execution Workflow
-9. **`trace_workflow`**
+9. **`trace_workflow`** [FOR FUTURE] no need to implement these now!
     - **Parameters:** `entry_point: str`, `max_depth: int = 5`
     - **Scope:** Follows the execution path from a specific entry point (like a controller method) and generates a Markdown Mermaid flowchart diagram of the logic.
 

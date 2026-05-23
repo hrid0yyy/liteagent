@@ -33,4 +33,12 @@ class Settings(BaseSettings):
     inspector_port: int = 8000
     inspector_port_search_limit: int = 100
 
+    # Insight settings
+    insight_embedding_provider: str = "gemini"
+    insight_embedding_model: Optional[str] = None
+    insight_embedding_base_url: str = "http://localhost:11434"
+    insight_auto_index: bool = True
+    insight_log_discovery: bool = True
+    insight_log_paths: list[str] = []
+
 settings = Settings()

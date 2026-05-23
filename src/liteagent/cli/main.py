@@ -20,6 +20,9 @@ from ..core.logger import start_session_logger, end_session_logger, log_event, l
 from .formatter import format_message, format_tool_output, console
 from .server import start_server
 from ..core.session import session_service
+from ..insight.agent import setup_insight_tools
+from ..tools.registry import registry
+from pathlib import Path
 
 # Suppress annoying dependency warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -37,9 +40,14 @@ def do(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
     resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
-    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector."),
+    no_insight: bool = typer.Option(False, "--no-insight", help="Disable insight tools.")
 ):
     """Run a single task using the agent."""
+    if not no_insight:
+        insight_tools = setup_insight_tools(Path(os.getcwd()))
+        for t in insight_tools:
+            registry.register(t)
     try:
         asyncio.run(_run_task(task, provider_name, model, resume, inspector))
     except KeyboardInterrupt:
@@ -50,9 +58,14 @@ def chat(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
     resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
-    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector."),
+    no_insight: bool = typer.Option(False, "--no-insight", help="Disable insight tools.")
 ):
     """Open an interactive chat session with the agent."""
+    if not no_insight:
+        insight_tools = setup_insight_tools(Path(os.getcwd()))
+        for t in insight_tools:
+            registry.register(t)
     try:
         asyncio.run(_run_chat(provider_name, model, resume, inspector))
     except KeyboardInterrupt:
