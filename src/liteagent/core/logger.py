@@ -82,17 +82,101 @@ def _safe_payload(event_type: str, payload: Any) -> Any:
 
 
 def _record_to_text(record: Dict[str, Any]) -> str:
-    header = (
-        f"[{record['ts']}] {record['level'].upper()} "
-        f"session={record['session_id']} turn={record.get('turn_index')} "
-        f"component={record['component']} event={record['event_type']} id={record['event_id']}"
-    )
-    payload = record.get("payload")
-    if isinstance(payload, str):
-        payload_text = payload
-    else:
-        payload_text = pformat(payload, width=120, compact=False)
-    return f"{header}\n{payload_text}\n{'-' * 100}\n"
+    event_type = record.get("event_type", "")
+    payload = record.get("payload", {})
+    level = record.get("level", "info")
+    
+    if not isinstance(payload, dict):
+        if isinstance(payload, str):
+            payload = {"raw_message": payload}
+        else:
+            try:
+                payload = dict(payload)
+            except (TypeError, ValueError):
+                payload = {"raw_data": str(payload)}
+
+    # Helper to collapse objects into a single line string
+    def _to_single_line(obj: Any) -> str:
+        if isinstance(obj, str):
+            return obj.replace("\r", " ").replace("\n", " ").strip()
+        try:
+            return json.dumps(obj, ensure_ascii=False, default=str)
+        except Exception:
+            return str(obj).replace("\r", " ").replace("\n", " ").strip()
+
+    # Capture ALL possible errors and warnings (including rate limits/retries)
+    if level in ["error", "warn"] or "error" in event_type.lower() or "retry" in event_type.lower():
+        tag = "[ERROR]" if level == "error" or "error" in event_type.lower() else "[WARNING]"
+        error_msg = payload.get("error", payload.get("raw_message", _to_single_line(payload)))
+        error_msg = _to_single_line(error_msg)
+        component = record.get("component", "unknown")
+        return f"{tag} ({event_type}) Component: {component} Payload: {error_msg}\n\n"
+        
+    if event_type == "session_started":
+        settings_str = " ".join(f"{k}: {v}" for k, v in payload.items())
+        return f"[CONFIG] Session Start: {record['ts']} {settings_str}\n\n"
+        
+    if event_type == "user_input":
+        content = _to_single_line(payload.get("content", ""))
+        return f"[USER PROMPT] {content}\n\n"
+        
+    if event_type == "tool_execute_start":
+        name = payload.get("name", "")
+        args_str = _to_single_line(payload.get("typed_args", {}))
+        return f"[TOOL CALL] Tool: {name} Parameters: {args_str}\n\n"
+        
+    if event_type == "tool_execute_end":
+        name = payload.get("name", "")
+        result_str = _to_single_line(payload.get("result", ""))
+        return f"[TOOL RESULT] Tool: {name} Output: {result_str}\n\n"
+        
+    if event_type == "assistant_message":
+        msg = payload.get("message", {})
+        
+        # Skip tool messages that get passed here by mistake
+        role = getattr(msg, "type", "") if hasattr(msg, "type") else msg.get("role", "") if isinstance(msg, dict) else ""
+        if role == "tool":
+            return ""
+        
+        if hasattr(msg, "content"):
+            content = getattr(msg, "content", "")
+            tool_calls = getattr(msg, "tool_calls", [])
+            additional_kwargs = getattr(msg, "additional_kwargs", {})
+            reasoning = additional_kwargs.get("reasoning_content", "") if isinstance(additional_kwargs, dict) else ""
+            if hasattr(msg, "reasoning_content") and not reasoning:
+                reasoning = getattr(msg, "reasoning_content", "")
+        elif isinstance(msg, dict):
+            content = msg.get("content", "")
+            tool_calls = msg.get("tool_calls", [])
+            additional_kwargs = msg.get("additional_kwargs", {})
+            reasoning = additional_kwargs.get("reasoning_content", "") if isinstance(additional_kwargs, dict) else ""
+            if not reasoning:
+                reasoning = msg.get("reasoning_content", "")
+        else:
+            content = str(msg)
+            tool_calls = []
+            reasoning = ""
+            
+        out = ""
+        if reasoning:
+            reasoning = _to_single_line(reasoning)
+            out += f"[AGENT THINKING] {reasoning}\n\n"
+            
+        if content:
+            content_str = _to_single_line(content)
+            if not tool_calls and content_str.strip():
+                out += f"[AGENT RESPONSE] {content_str}\n\n"
+            elif content_str.strip():
+                out += f"[AGENT THINKING] {content_str}\n\n"
+                
+        return out
+
+    if event_type == "session_ended":
+        summary = _to_single_line(payload)
+        return f"[SESSION END] {summary}\n\n"
+
+    # Suppress other verbose, internal events to declutter the log
+    return ""
 
 
 def _write_record(record: Dict[str, Any]) -> None:
