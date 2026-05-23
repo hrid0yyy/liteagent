@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 class KnowledgeGraph:
     """SQLite-backed code knowledge graph."""
