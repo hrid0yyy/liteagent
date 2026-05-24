@@ -63,19 +63,39 @@ class KnowledgeGraph:
     
     def trace_calls(self, symbol: str, direction: str = "both", depth: int = 3, max_nodes: int = 50) -> Dict[str, Any]:
         """
-        Traces calls by querying the relationships table.
+        Traces calls by querying the relationships table using a recursive BFS search.
         """
         cursor = self.conn.cursor()
+        
+        def bfs(start_symbol: str, target_col: str, search_col: str) -> List[str]:
+            visited = set()
+            queue = [(start_symbol, 0)]
+            results = set()
+            
+            while queue and len(results) < max_nodes:
+                curr, curr_depth = queue.pop(0)
+                if curr_depth >= depth:
+                    continue
+                    
+                cursor.execute(f"SELECT DISTINCT {target_col} FROM relationships WHERE {search_col} = ?", (curr,))
+                for row in cursor.fetchall():
+                    node = row[0]
+                    if node not in visited:
+                        visited.add(node)
+                        results.add(node)
+                        queue.append((node, curr_depth + 1))
+            return list(results)
+
         callers = []
         callees = []
         
         if direction in ("both", "callers"):
-            cursor.execute("SELECT DISTINCT source FROM relationships WHERE target = ?", (symbol,))
-            callers = [row[0] for row in cursor.fetchall()]
+            # Callers: Who calls the symbol? (Find sources where target = symbol)
+            callers = bfs(symbol, target_col="source", search_col="target")
             
         if direction in ("both", "callees"):
-            cursor.execute("SELECT DISTINCT target FROM relationships WHERE source = ?", (symbol,))
-            callees = [row[0] for row in cursor.fetchall()]
+            # Callees: Who does the symbol call? (Find targets where source = symbol)
+            callees = bfs(symbol, target_col="target", search_col="source")
             
         return {
             "symbol": symbol,

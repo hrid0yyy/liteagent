@@ -49,6 +49,9 @@ class ASTParser:
         lines = code_str.split('\n')
         
         def get_identifier(node):
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                return code_str[name_node.start_byte:name_node.end_byte]
             for child in node.children:
                 if child.type == "identifier":
                     return code_str[child.start_byte:child.end_byte]
@@ -96,9 +99,9 @@ class ASTParser:
                         if expr_node.type == "identifier":
                             callee_name = code_str[expr_node.start_byte:expr_node.end_byte]
                         elif expr_node.type == "member_access_expression":
-                            for c in expr_node.children:
-                                if c.type == "identifier" and c != expr_node.children[0]:
-                                    callee_name = code_str[c.start_byte:c.end_byte]
+                            last_child = expr_node.children[-1]
+                            if last_child.type == "identifier":
+                                callee_name = code_str[last_child.start_byte:last_child.end_byte]
                     
                     if callee_name:
                         self.graph_store.insert_relationship(current_method, callee_name, "calls", file_path)
