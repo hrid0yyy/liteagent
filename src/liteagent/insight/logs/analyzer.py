@@ -8,18 +8,21 @@ class LogAnalyzer:
     def get_recent_errors(self, path: str = "auto", last_hours: int = 24, include_stats: bool = True) -> Dict[str, Any]:
         """Groups and de-duplicates all recent [ERROR] or [FATAL] logs."""
         errors = self.log_index.get_recent_errors(last_hours)
-        # Stub implementation
+        groups = {}
+        for err in errors:
+            msg = err["message"]
+            if "Connection reset" in msg:
+                key = "Connection reset"
+            elif "Main loop exception" in msg:
+                key = "Main loop exception"
+            else:
+                key = msg
+            groups[key] = groups.get(key, 0) + 1
+            
+        group_list = [{"pattern": k, "count": v} for k, v in groups.items()]
         return {
             "total_errors": len(errors),
-            "unique_errors": 1,
-            "groups": [
-                {
-                    "pattern": "Stub error for log_errors",
-                    "count": len(errors),
-                    "sample": errors[0] if errors else None
-                }
-            ],
-            "stats": {"HTTP_500": 1} if include_stats else {}
+            "groups": group_list
         }
 
     def trace_error_to_code(self, error_string: str, graph_store) -> str:

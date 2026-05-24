@@ -33,20 +33,51 @@ class KnowledgeGraph:
                     file_path TEXT NOT NULL
                 )
             """)
+
+    def insert_symbol(self, name: str, qualified_name: str, kind: str, file_path: str, start_line: int, end_line: int, source_code: str):
+        with self.conn:
+            self.conn.execute("""
+                INSERT INTO symbols (name, qualified_name, kind, file_path, start_line, end_line, source_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(qualified_name) DO UPDATE SET
+                    name=excluded.name,
+                    kind=excluded.kind,
+                    file_path=excluded.file_path,
+                    start_line=excluded.start_line,
+                    end_line=excluded.end_line,
+                    source_code=excluded.source_code
+            """, (name, qualified_name, kind, file_path, start_line, end_line, source_code))
+
+    def insert_relationship(self, source: str, target: str, kind: str, file_path: str):
+        with self.conn:
+            self.conn.execute("""
+                INSERT INTO relationships (source, target, kind, file_path)
+                VALUES (?, ?, ?, ?)
+            """, (source, target, kind, file_path))
     
     def trace_calls(self, symbol: str, direction: str = "both", depth: int = 3, max_nodes: int = 50) -> Dict[str, Any]:
         """
-        Stub for tracing calls.
-        In a real implementation, this would perform a recursive BFS/DFS on the `relationships` table.
+        Traces calls by querying the relationships table.
         """
-        # For demonstration
+        cursor = self.conn.cursor()
+        callers = []
+        callees = []
+        
+        if direction in ("both", "callers"):
+            cursor.execute("SELECT DISTINCT source FROM relationships WHERE target = ?", (symbol,))
+            callers = [row[0] for row in cursor.fetchall()]
+            
+        if direction in ("both", "callees"):
+            cursor.execute("SELECT DISTINCT target FROM relationships WHERE source = ?", (symbol,))
+            callees = [row[0] for row in cursor.fetchall()]
+            
         return {
             "symbol": symbol,
             "direction": direction,
             "depth": depth,
-            "nodes_traversed": 0,
-            "callers": [],
-            "callees": []
+            "nodes_traversed": len(callers) + len(callees),
+            "callers": callers,
+            "callees": callees
         }
     
     def find_symbol_by_snippet(self, snippet: str) -> Optional[Dict[str, Any]]:

@@ -12,11 +12,15 @@ def setup_insight_tools(project_dir: Path):
     
     # Initialize components here (e.g., GraphStore, VectorStore, LogIndex)
     from .indexer.graph_store import KnowledgeGraph
+    from .indexer.ast_parser import ASTParser
     from .logs.log_index import LogIndex
     from .logs.analyzer import LogAnalyzer
     from .retrieval.retriever import HybridRetriever
 
     graph_store = KnowledgeGraph(insight_dir / "knowledge.db")
+    ast_parser = ASTParser(graph_store)
+    ast_parser.parse_directory(project_dir)
+    
     log_index = LogIndex(insight_dir / "log_index.db")
     log_analyzer = LogAnalyzer(log_index)
     retriever = HybridRetriever(insight_dir)

@@ -38,22 +38,36 @@ class LogIndex:
 
     def search(self, query: str, is_plain: bool = True, level: Optional[str] = None, last_hours: Optional[int] = None, error_code: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         """Unified search across all indexed log records."""
-        # Stub implementation
-        cursor = self.conn.cursor()
-        if is_plain:
-            # Fake query returning a stub
-            return [{
-                "timestamp": "2026-05-23T12:00:00Z",
-                "level": "ERROR",
-                "file_path": "logs/app.log",
-                "message": f"Stub log match for {query}"
-            }]
-        return []
+        log_file = Path("C:/temp/codeshare-logs/app.log")
+        results = []
+        if not log_file.exists(): return results
+        try:
+            with open(log_file, "r") as f:
+                lines = f.readlines()
+                for line in reversed(lines):
+                    if query in line:
+                        results.append({
+                            "timestamp": line.split("]")[0][1:] if "]" in line else "",
+                            "level": "ERROR" if "[ERROR]" in line else "INFO",
+                            "file_path": str(log_file),
+                            "message": line.strip()
+                        })
+                    if len(results) >= limit: break
+        except Exception:
+            pass
+        return results
 
     def get_recent_errors(self, last_hours: int = 24) -> List[Dict[str, Any]]:
-        return [{
-            "timestamp": "2026-05-23T12:00:00Z",
-            "level": "ERROR",
-            "file_path": "logs/app.log",
-            "message": "Stub error for log_errors"
-        }]
+        log_file = Path("C:/temp/codeshare-logs/app.log")
+        results = []
+        if not log_file.exists(): return results
+        try:
+            with open(log_file, "r") as f:
+                for line in f:
+                    if "[ERROR]" in line:
+                        results.append({
+                            "message": line.strip()
+                        })
+        except Exception:
+            pass
+        return results

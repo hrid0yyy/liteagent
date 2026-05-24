@@ -39,6 +39,6 @@ class Settings(BaseSettings):
     insight_embedding_base_url: str = "http://localhost:11434"
     insight_auto_index: bool = True
     insight_log_discovery: bool = True
-    insight_log_paths: list[str] = []
+    insight_log_paths: list[str] = ["C:/temp/codeshare-logs/app.log"]
 
 settings = Settings()
