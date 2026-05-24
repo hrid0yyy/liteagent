@@ -16,14 +16,46 @@ def setup_insight_tools(project_dir: Path):
     from .logs.log_index import LogIndex
     from .logs.analyzer import LogAnalyzer
     from .retrieval.retriever import HybridRetriever
+    
+    import chromadb
+    from chromadb.utils import embedding_functions
+
+    chroma_client = chromadb.PersistentClient(path=str(insight_dir / "chromadb"))
+    emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    code_collection = chroma_client.get_or_create_collection("code_symbols", embedding_function=emb_fn)
 
     graph_store = KnowledgeGraph(insight_dir / "knowledge.db")
-    ast_parser = ASTParser(graph_store)
+    ast_parser = ASTParser(graph_store, code_collection)
     ast_parser.parse_directory(project_dir)
     
+    # --- File System Watcher ---
+    try:
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler
+
+        class CodeChangeHandler(FileSystemEventHandler):
+            valid_exts = (".cs", ".csproj", ".sln", ".json", ".config", ".xml", ".cshtml", ".razor")
+            
+            def on_modified(self, event):
+                if event.is_directory: return
+                if event.src_path.endswith(self.valid_exts):
+                    ast_parser.parse_file(Path(event.src_path))
+                    
+            def on_created(self, event):
+                if event.is_directory: return
+                if event.src_path.endswith(self.valid_exts):
+                    ast_parser.parse_file(Path(event.src_path))
+
+        observer = Observer()
+        observer.schedule(CodeChangeHandler(), str(project_dir), recursive=True)
+        observer.start()
+        # Thread will run in the background (daemon)
+    except ImportError:
+        pass
+        
     log_index = LogIndex(insight_dir / "log_index.db")
     log_analyzer = LogAnalyzer(log_index)
-    retriever = HybridRetriever(insight_dir)
+    retriever = HybridRetriever(insight_dir, code_collection)
 
     def search_code(query: str, top_k: int = 8) -> str:
         """

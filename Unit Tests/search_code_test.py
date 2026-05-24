@@ -34,9 +34,19 @@ class SearchCodeTests(unittest.TestCase):
     def test_search_for_log_spammer(self):
         """Test if search_code can find how logs are spammed."""
         result = self.__class__.search_code("how are logs being spammed")
-        
-        # Ensure the correct class is present in the response
+        self.assertNotIn("No code found matching", result)
         self.assertIn("LogSpammer", result)
+
+    def test_search_for_csproj(self):
+        """Test if search_code can find the .csproj file contents."""
+        result = self.__class__.search_code("net8.0")
+        
+        # Ensure it didn't fail to find code
+        self.assertNotIn("No code found matching", result)
+        
+        # Ensure the correct file and contents are present in the response
+        self.assertIn("CodeShareTest.csproj", result)
+        self.assertIn("<TargetFramework>net8.0</TargetFramework>", result)
 
 if __name__ == '__main__':
     unittest.main()

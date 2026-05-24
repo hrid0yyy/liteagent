@@ -54,6 +54,12 @@ class KnowledgeGraph:
                 INSERT INTO relationships (source, target, kind, file_path)
                 VALUES (?, ?, ?, ?)
             """, (source, target, kind, file_path))
+            
+    def clear_file(self, file_path: str):
+        """Removes all symbols and relationships associated with a file."""
+        with self.conn:
+            self.conn.execute("DELETE FROM symbols WHERE file_path = ?", (file_path,))
+            self.conn.execute("DELETE FROM relationships WHERE file_path = ?", (file_path,))
     
     def trace_calls(self, symbol: str, direction: str = "both", depth: int = 3, max_nodes: int = 50) -> Dict[str, Any]:
         """

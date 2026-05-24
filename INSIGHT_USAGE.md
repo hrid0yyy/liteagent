@@ -47,6 +47,30 @@ The agent now has native access to the following 6 powerful tools:
    - **What it does:** A magic bridge tool that connects logs to source code. It takes an error string from the logs and cross-references it with your code to find the exact file and line number that threw the error.
    - **When the agent uses it:** Automatically called by the agent after finding a critical error via `get_log_errors` to give you the exact source code location.
 
+## Log Configuration
+
+To configure which log files the agent analyzes, there are **two main mechanisms** for finding logs, which you can configure using a `.env` file or environment variables.
+
+### How the Agent Finds Logs
+1. **Explicit Paths (`INSIGHT_LOG_PATHS`):** Provide an exact JSON list of files you want the agent to analyze. *(Default is `["C:/temp/codeshare-logs/app.log"]`)*
+2. **Auto-Discovery (`INSIGHT_LOG_DISCOVERY`):** When set to `True`, the agent automatically scans your project workspace and recursively finds files ending in `.log`.
+
+### How to Configure Logs per Project
+The cleanest way to configure the agent to analyze the logs for a specific project (e.g., `D:\project_a`) is to create a `.env` file directly in the root of that project folder.
+
+**Example `D:\project_a\.env`:**
+```env
+# Explicitly target specific log files
+INSIGHT_LOG_PATHS='["D:/project_a/logs/app.log", "D:/project_a/logs/error.log"]'
+
+# OR automatically discover all .log files in the project
+INSIGHT_LOG_DISCOVERY=True
+```
+
+Once this file is created, navigate to `D:\project_a` in your terminal and run `liteagent chat -i`. The agent will automatically detect your project-specific `.env` file and use the correct logs.
+
+*Note: You can also place this `.env` file globally in your home directory at `~/.liteagent/.env` to apply the same configuration across all projects.*
+
 ## Example Workflow
 
 Here is how you can interact with the agent using these tools:
