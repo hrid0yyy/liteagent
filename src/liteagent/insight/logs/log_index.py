@@ -36,7 +36,7 @@ class LogIndex:
                 )
             """)
 
-    def search(self, query: str, is_plain: bool = True, level: Optional[str] = None, last_hours: Optional[int] = None, error_code: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    def search(self, query: str, is_plain: bool = True, context_lines: int = 2, level: Optional[str] = None, last_hours: Optional[int] = None, error_code: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         """Unified search across all indexed log records."""
         log_file = Path("C:/temp/codeshare-logs/app.log")
         results = []
@@ -44,13 +44,27 @@ class LogIndex:
         try:
             with open(log_file, "r") as f:
                 lines = f.readlines()
-                for line in reversed(lines):
+                total_lines = len(lines)
+                for i in range(total_lines - 1, -1, -1):
+                    line = lines[i]
                     if query in line:
+                        start_idx = max(0, i - context_lines)
+                        end_idx = min(total_lines, i + context_lines + 1)
+                        
+                        context_lines = []
+                        for j in range(start_idx, end_idx):
+                            prefix = ">> " if j == i else "   "
+                            context_lines.append(f"{prefix}{j + 1}: {lines[j].strip()}")
+                        
+                        context_block = "\n".join(context_lines)
+                        
                         results.append({
+                            "line_number": i + 1,
                             "timestamp": line.split("]")[0][1:] if "]" in line else "",
                             "level": "ERROR" if "[ERROR]" in line else "INFO",
                             "file_path": str(log_file),
-                            "message": line.strip()
+                            "message": line.strip(),
+                            "context": context_block
                         })
                     if len(results) >= limit: break
         except Exception:
