@@ -1094,20 +1094,19 @@ These 9 new tools are injected into the agent's LangGraph configuration. They ar
 4. **`get_class_hierarchy`** [FOR FUTURE] no need to implement these now!
    - **Parameters:** `class_name: str`
    - **Scope:** Queries AST inheritance records to build a tree of parent and child classes (highly useful for C# and Java OOP structures).
-5. **`get_project_map`**
-   - **Parameters:** `path: str = "."`
-   - **Scope:** Returns a folder/module overview. **Safety:** Uses Progressive Disclosure. It strictly returns only Depth-1 of the requested `path` (no deep recursion). The agent must explicitly request sub-folders to drill down.
+5. **`get_project_map`** [DELETED]
+   - **Scope:** Merged into the core `get_workspace_info(max_depth=1)` tool to prevent redundancy and keep the agent's toolset lean.
 
 #### Log Analytics & Debugging
 6. **`search_logs`**
    - **Parameters:** `query: str`, `is_plain: bool = True`, `level: str = None`, `last_hours: int = None`, `error_code: str = None`, `limit: int = 50`
    - **Scope:** Queries the SQLite FTS5 log index. Use `is_plain=True` for instant keyword/error code lookup. Use `is_plain=False` to execute Python Regex directly against raw log lines (slower but highly flexible).
-7. **`trace_error_to_code`**
-   - **Parameters:** `error_string: str`
-   - **Scope:** The bridging tool. Given a log error, it searches logs for stack traces. If none exist, it cross-references the error string with the AST `logged_errors` index to find exactly which C#/Python function threw the error, returning the full execution context.
-8. **`get_log_errors`**
-    - **Parameters:** `path: str = "auto"`, `last_hours: int = 24`, `include_stats: bool = True`
-    - **Scope:** Groups and de-duplicates all recent `[ERROR]` or `[FATAL]` logs. If `include_stats=True`, it also returns aggregate statistics for formal error codes (e.g. `HTTP_500: 42 occurrences`). **Safety:** Uses Auto-Aggregation. If >50 unique errors are found, it skips returning raw traces and instead returns a compressed statistical summary.
+7. **`trace_log_to_code`**
+   - **Parameters:** `log_string: str`
+   - **Scope:** The bridging tool. Given any raw log line, it matches it against AST-extracted regex templates stored in SQLite. It perfectly maps the log back to its origin file, method, and source code line without hallucinating. Handles dynamic string variables perfectly. Returns graceful failure for third-party logs.
+8. **`get_log_stats`**
+    - **Parameters:** `module: str = None`, `level: str = None`, `last_hours: int = 24`
+    - **Scope:** The Universal Log Profiler. It leverages the AST Parser to dynamically extract all logging strings (errors, warnings, info) directly from the source code. It then queries the log index for those exact strings. Use `level="ERROR"` for a global crash report, or `module="AuthService"` for feature-specific usage statistics. **Safety:** Automatically deduplicates logs by matching extracted AST wildcard patterns (stripping unique timestamps) preventing token-overflow.
 
 #### Execution Workflow
 9. **`trace_workflow`** [FOR FUTURE] no need to implement these now!

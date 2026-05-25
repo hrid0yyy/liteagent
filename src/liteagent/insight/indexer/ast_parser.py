@@ -105,6 +105,31 @@ class ASTParser:
                     
                     if callee_name:
                         self.graph_store.insert_relationship(current_method, callee_name, "calls", file_path)
+                        
+                        # Extract log templates
+                        lower_callee = callee_name.lower()
+                        if "log" in lower_callee or "appendalltext" in lower_callee or "writeline" in lower_callee:
+                            arg_node = node.child_by_field_name("arguments") or next((c for c in node.children if c.type == "argument_list"), None)
+                            if arg_node:
+                                arg_text = code_str[arg_node.start_byte:arg_node.end_byte]
+                                import re
+                                strings = re.findall(r'"([^"]*)"', arg_text)
+                                for s in strings:
+                                    if len(s) > 3:
+                                        lvl = "INFO"
+                                        if "error" in lower_callee or "[ERROR]" in s: lvl = "ERROR"
+                                        elif "warn" in lower_callee or "[WARN]" in s: lvl = "WARN"
+                                        elif "fatal" in lower_callee or "[FATAL]" in s: lvl = "FATAL"
+                                        elif "debug" in lower_callee or "[DEBUG]" in s: lvl = "DEBUG"
+                                        
+                                        # Safely escape ALL regex characters
+                                        # But first strip raw C# escape sequences like \n, \r
+                                        s = s.replace('\\n', '').replace('\\r', '').replace('\\t', '')
+                                        escaped_s = re.escape(s)
+                                        # re.escape turns {var} into \{var\}. We replace it with non-greedy wildcard (.*?)
+                                        template = re.sub(r'\\\{.*?\\\}', '(.*?)', escaped_s)
+                                        
+                                        self.graph_store.insert_log_template(file_path, current_method, lvl, template)
             
             for child in node.children:
                 traverse(child)

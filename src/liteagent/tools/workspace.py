@@ -4,8 +4,8 @@ import fnmatch
 from pathlib import Path
 from typing import List, Optional
 
-def get_workspace_info(dir_path: str = ".", ignore_patterns: Optional[List[str]] = None) -> str:
-    """ Lists the directory structure, respecting common ignore patterns. """
+def get_workspace_info(dir_path: str = ".", ignore_patterns: Optional[List[str]] = None, max_depth: int = 3) -> str:
+    """ Lists the directory structure, respecting common ignore patterns and bounding depth. """
     output = []
     base_path = Path(dir_path).resolve()
     
@@ -28,7 +28,7 @@ def get_workspace_info(dir_path: str = ".", ignore_patterns: Optional[List[str]]
                 if item.is_dir():
                     new_indent = indent + ("    " if is_last else "│   ")
                     # Limit depth to avoid massive output
-                    if len(new_indent) // 4 < 3: 
+                    if len(new_indent) // 4 < max_depth: 
                         _list_dir(item, new_indent)
         except PermissionError:
             output.append(f"{indent} [Permission Denied]")

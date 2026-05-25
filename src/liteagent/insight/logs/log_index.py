@@ -47,7 +47,17 @@ class LogIndex:
                 total_lines = len(lines)
                 for i in range(total_lines - 1, -1, -1):
                     line = lines[i]
-                    if query in line:
+                    
+                    if is_plain:
+                        match = query in line
+                    else:
+                        import re
+                        try:
+                            match = re.search(query, line) is not None
+                        except:
+                            match = False
+                            
+                    if match:
                         start_idx = max(0, i - context_lines)
                         end_idx = min(total_lines, i + context_lines + 1)
                         

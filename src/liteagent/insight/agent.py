@@ -18,10 +18,25 @@ def setup_insight_tools(project_dir: Path):
     from .retrieval.retriever import HybridRetriever
     
     import chromadb
-    from chromadb.utils import embedding_functions
+    
+    # Try to load heavy ML models, but gracefully fallback to a Dummy function if it fails 
+    # due to missing dependencies, MemoryErrors, or testing flags, so the SQLite tools still work!
+    try:
+        import os
+        if os.environ.get("LITEAGENT_TESTING") == "1":
+            raise Exception("Testing mode enabled, skipping ML.")
+        from chromadb.utils import embedding_functions
+        emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    except Exception as e:
+        print(f"[WARN] ML Model skipped ({str(e)}). Semantic Search will be mocked.")
+        class DummyEmbeddingFunction:
+            def __call__(self, input):
+                return [[0.0] * 384 for _ in input]
+            def name(self) -> str:
+                return "sentence_transformer"
+        emb_fn = DummyEmbeddingFunction()
 
     chroma_client = chromadb.PersistentClient(path=str(insight_dir / "chromadb"))
-    emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
     code_collection = chroma_client.get_or_create_collection("code_symbols", embedding_function=emb_fn)
 
     graph_store = KnowledgeGraph(insight_dir / "knowledge.db")
@@ -86,26 +101,6 @@ def setup_insight_tools(project_dir: Path):
         except Exception as e:
             return f"Error tracing calls: {str(e)}"
 
-    def get_project_map(path: str = ".") -> str:
-        """
-        Returns a depth-1 folder/module overview.
-        Use this to understand directory structures progressively.
-        """
-        try:
-            target_path = project_dir / path
-            if not target_path.exists():
-                return f"Path does not exist: {target_path}"
-            if not target_path.is_dir():
-                return f"Not a directory: {target_path}"
-            
-            items = []
-            for item in target_path.iterdir():
-                kind = "DIR " if item.is_dir() else "FILE"
-                items.append(f"[{kind}] {item.name}")
-            return "\n".join(sorted(items))
-        except Exception as e:
-            return f"Error reading project map: {str(e)}"
-
     def search_logs(query: str, is_plain: bool = True, context_lines: int = 2, level: Optional[str] = None, last_hours: Optional[int] = None, error_code: Optional[str] = None, limit: int = 50) -> str:
         """
         Queries the FTS5 log index.
@@ -125,28 +120,82 @@ def setup_insight_tools(project_dir: Path):
         except Exception as e:
             return f"Error searching logs: {str(e)}"
 
-    def get_log_errors(path: str = "auto", last_hours: int = 24, include_stats: bool = True) -> str:
+    def get_log_stats(module: str = None, level: str = None, last_hours: int = 24) -> str:
         """
-        Groups and de-duplicates all recent [ERROR] or [FATAL] logs.
-        Returns aggregate statistics to prevent context overflow.
-        """
-        try:
-            summary = log_analyzer.get_recent_errors(path, last_hours, include_stats)
-            return json.dumps(summary, indent=2)
-        except Exception as e:
-            return f"Error getting log errors: {str(e)}"
-
-    def trace_error_to_code(error_string: str) -> str:
-        """
-        Cross-references an error string from logs to find exactly which function threw the error.
-        Returns the full execution context, file path, and line number.
+        The Universal Log Profiler.
+        Queries AST extracted log templates and calculates their occurrence stats from the log file.
+        Use module to filter by file or class name, and level (e.g. ERROR) to filter by severity.
         """
         try:
-            result = log_analyzer.trace_error_to_code(error_string, graph_store)
-            if not result:
-                return f"Could not map error to source code: {error_string}"
-            return result
+            templates = graph_store.get_log_templates(module, level)
+            if not templates:
+                return f"No log templates found in codebase for module={module}, level={level}."
+                
+            stats = {}
+            for t in templates:
+                query = t["template"]
+                results = log_index.search(query, is_plain=False, limit=10000)
+                
+                if results:
+                    stats[query] = {
+                        "count": len(results),
+                        "level": t["level"],
+                        "file": Path(t["file_path"]).name,
+                        "method": t["method_name"]
+                    }
+                
+            if not stats:
+                return f"All {len(templates)} extracted log templates returned 0 occurrences. System healthy."
+                
+            output = [f"Log Statistics for module={module}, level={level}:"]
+            for template, data in stats.items():
+                output.append(f"- [{data['level']}] {template} -> Found in: {data['file']}::{data['method']} | Occurrences: {data['count']}")
+            return "\n".join(output)
         except Exception as e:
-            return f"Error tracing error to code: {str(e)}"
+            return f"Error getting log stats: {str(e)}"
 
-    return [search_code, trace_calls, get_project_map, search_logs, get_log_errors, trace_error_to_code]
+    def trace_log_to_code(log_string: str) -> str:
+        """
+        Cross-references an exact log string with AST-extracted templates to find
+        exactly which file and method generated it.
+        """
+        try:
+            templates = graph_store.get_log_templates()
+            import re
+            
+            matched_template = None
+            for t in templates:
+                pattern = t["template"]
+                try:
+                    if re.search(pattern, log_string):
+                        matched_template = t
+                        break
+                except re.error:
+                    continue
+                    
+            if not matched_template:
+                return "This log does not match any extracted templates from the codebase. It may originate from a third-party dependency or the AST index is outdated."
+                
+            cursor = graph_store.conn.cursor()
+            cursor.execute("SELECT start_line, end_line, source_code FROM symbols WHERE file_path COLLATE NOCASE = ? AND name = ?", 
+                          (matched_template["file_path"], matched_template["method_name"]))
+            row = cursor.fetchone()
+            
+            output = [
+                f"Log successfully traced!",
+                f"File: {matched_template['file_path']}",
+                f"Method: {matched_template['method_name']}",
+                f"Level: {matched_template['level']}"
+            ]
+            
+            if row:
+                output.append(f"Line: {row[0]}-{row[1]}")
+                output.append(f"Source Code:\n{row[2]}")
+            else:
+                output.append("Source code snippet could not be retrieved.")
+                
+            return "\n".join(output)
+        except Exception as e:
+            return f"Error tracing log to code: {str(e)}"
+
+    return [search_code, trace_calls, search_logs, get_log_stats, trace_log_to_code]

@@ -14,8 +14,8 @@ class SearchLogsTests(unittest.TestCase):
         project_dir = Path(__file__).parent.parent / "tests" / "test-project" / "CodeShareTest"
         tools = setup_insight_tools(project_dir)
         
-        # The search_logs tool is the 4th tool (index 3)
-        cls.search_logs = tools[3]
+        # The search_logs tool is the 3rd tool (index 2)
+        cls.search_logs = tools[2]
 
     def test_search_for_connection_reset(self):
         """Test if search_logs can find the 'Connection reset' errors in the app.log file."""

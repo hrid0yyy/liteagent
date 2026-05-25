@@ -33,6 +33,15 @@ class KnowledgeGraph:
                     file_path TEXT NOT NULL
                 )
             """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS log_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL,
+                    method_name TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    template TEXT NOT NULL
+                )
+            """)
 
     def insert_symbol(self, name: str, qualified_name: str, kind: str, file_path: str, start_line: int, end_line: int, source_code: str):
         with self.conn:
@@ -55,11 +64,19 @@ class KnowledgeGraph:
                 VALUES (?, ?, ?, ?)
             """, (source, target, kind, file_path))
             
+    def insert_log_template(self, file_path: str, method_name: str, level: str, template: str):
+        with self.conn:
+            self.conn.execute("""
+                INSERT INTO log_templates (file_path, method_name, level, template)
+                VALUES (?, ?, ?, ?)
+            """, (file_path, method_name, level, template))
+            
     def clear_file(self, file_path: str):
-        """Removes all symbols and relationships associated with a file."""
+        """Removes all symbols, relationships, and templates associated with a file."""
         with self.conn:
             self.conn.execute("DELETE FROM symbols WHERE file_path = ?", (file_path,))
             self.conn.execute("DELETE FROM relationships WHERE file_path = ?", (file_path,))
+            self.conn.execute("DELETE FROM log_templates WHERE file_path = ?", (file_path,))
     
     def trace_calls(self, symbol: str, direction: str = "both", depth: int = 3, max_nodes: int = 50) -> Dict[str, Any]:
         """
@@ -121,3 +138,28 @@ class KnowledgeGraph:
                 "code": row[3]
             }
         return None
+
+    def get_log_templates(self, module: Optional[str] = None, level: Optional[str] = None) -> List[Dict[str, Any]]:
+        cursor = self.conn.cursor()
+        query = "SELECT file_path, method_name, level, template FROM log_templates WHERE 1=1"
+        params = []
+        
+        if module:
+            query += " AND (file_path LIKE ? OR method_name LIKE ?)"
+            params.extend([f"%{module}%", f"%{module}%"])
+            
+        if level:
+            query += " AND level = ?"
+            params.append(level)
+        query += " ORDER BY LENGTH(template) DESC"
+        
+        cursor.execute(query, params)
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "file_path": row[0],
+                "method_name": row[1],
+                "level": row[2],
+                "template": row[3]
+            })
+        return results
