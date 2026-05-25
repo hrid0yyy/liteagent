@@ -12,7 +12,7 @@ def create_search_code_tool(providers: ToolProviderFactory):
             top_k: The maximum number of results to return (default: 3).
         """
         try:
-            top_k = int(top_k)
+            top_k = int(top_k) if top_k not in (None, "") else 3
             results = providers.insight.retriever.search(query, top_k)
             if not results:
                 return f"No code found matching: {query}"

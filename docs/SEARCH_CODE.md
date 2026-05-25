@@ -13,7 +13,7 @@ sequenceDiagram
     participant C as ChromaDB (Vector)
     participant S as SQLite (Metadata)
 
-    A->>R: search_code("ValidateToken logic", top_k=8)
+    A->>R: search_code("ValidateToken logic", top_k=3)
     
     rect rgb(30, 40, 60)
         Note over R, C: Phase 1: Semantic Search

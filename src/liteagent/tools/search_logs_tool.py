@@ -17,11 +17,10 @@ def create_search_logs_tool(providers: ToolProviderFactory):
         """
         try:
             if isinstance(is_plain, str):
-                is_plain = is_plain.lower() in ('true', '1', 'yes', 't')
-            context_lines = int(context_lines)
-            if last_hours is not None:
-                last_hours = int(last_hours)
-            limit = int(limit)
+                is_plain = is_plain.lower() in ('true', '1', 'yes', 't') if is_plain else True
+            context_lines = int(context_lines) if context_lines not in (None, "") else 2
+            last_hours = int(last_hours) if last_hours not in (None, "") else None
+            limit = int(limit) if limit not in (None, "") else 50
             results = providers.insight.log_index.search(query, is_plain, context_lines, level, last_hours, error_code, limit)
             if not results:
                 return f"No logs found matching query: {query}"
