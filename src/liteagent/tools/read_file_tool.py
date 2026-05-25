@@ -5,6 +5,10 @@ from .providers import ToolProviderFactory
 def create_read_file_tool(providers: ToolProviderFactory):
     def read_file(file_paths: List[str], start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
         """Reads one or more files, optionally within a specific line range, prepending line numbers."""
+        if start_line is not None:
+            start_line = int(start_line)
+        if end_line is not None:
+            end_line = int(end_line)
         all_output = []
         for file_path in file_paths:
             path = Path(file_path)

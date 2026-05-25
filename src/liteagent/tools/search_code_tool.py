@@ -1,7 +1,7 @@
 from .providers import ToolProviderFactory
 
 def create_search_code_tool(providers: ToolProviderFactory):
-    def search_code(query: str, top_k: int = 8) -> str:
+    def search_code(query: str, top_k: int = 3) -> str:
         """
         Searches the codebase for specific functionality, concepts, or logic.
         Use this when you need to find code but don't know the exact file names.
@@ -9,9 +9,10 @@ def create_search_code_tool(providers: ToolProviderFactory):
         
         Args:
             query: The search query, concept, or logic to look for.
-            top_k: The maximum number of results to return (default: 8).
+            top_k: The maximum number of results to return (default: 3).
         """
         try:
+            top_k = int(top_k)
             results = providers.insight.retriever.search(query, top_k)
             if not results:
                 return f"No code found matching: {query}"

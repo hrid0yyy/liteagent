@@ -43,15 +43,22 @@ class InsightProviders:
 
             class CodeChangeHandler(FileSystemEventHandler):
                 valid_exts = (".cs", ".csproj", ".sln", ".json", ".config", ".xml", ".cshtml", ".razor")
+                ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent"}
                 
+                def _is_valid(self, path_str: str) -> bool:
+                    p = Path(path_str)
+                    if not p.suffix in self.valid_exts: return False
+                    if any(part in self.ignore_dirs for part in p.parts): return False
+                    return True
+
                 def on_modified(self, event):
                     if event.is_directory: return
-                    if event.src_path.endswith(self.valid_exts):
+                    if self._is_valid(event.src_path):
                         ast_parser.parse_file(Path(event.src_path))
                         
                 def on_created(self, event):
                     if event.is_directory: return
-                    if event.src_path.endswith(self.valid_exts):
+                    if self._is_valid(event.src_path):
                         ast_parser.parse_file(Path(event.src_path))
 
             observer = Observer()

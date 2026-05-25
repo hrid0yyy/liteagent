@@ -16,6 +16,12 @@ def create_search_logs_tool(providers: ToolProviderFactory):
             limit: Maximum number of matches to return.
         """
         try:
+            if isinstance(is_plain, str):
+                is_plain = is_plain.lower() in ('true', '1', 'yes', 't')
+            context_lines = int(context_lines)
+            if last_hours is not None:
+                last_hours = int(last_hours)
+            limit = int(limit)
             results = providers.insight.log_index.search(query, is_plain, context_lines, level, last_hours, error_code, limit)
             if not results:
                 return f"No logs found matching query: {query}"

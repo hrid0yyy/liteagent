@@ -14,6 +14,8 @@ def create_trace_calls_tool(providers: ToolProviderFactory):
             max_nodes: Maximum total nodes to return to prevent giant graphs.
         """
         try:
+            depth = int(depth)
+            max_nodes = int(max_nodes)
             results = providers.insight.graph_store.trace_calls(symbol, direction, depth, max_nodes)
             return json.dumps(results, indent=2)
         except Exception as e:

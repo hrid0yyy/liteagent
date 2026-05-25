@@ -15,6 +15,7 @@ def create_get_log_stats_tool(providers: ToolProviderFactory):
             last_hours: Calculate stats only for logs from the last N hours.
         """
         try:
+            last_hours = int(last_hours)
             templates = providers.insight.graph_store.get_log_templates(module, level)
             if not templates:
                 return f"No log templates found in codebase for module={module}, level={level}."
