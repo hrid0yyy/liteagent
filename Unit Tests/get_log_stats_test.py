@@ -40,5 +40,23 @@ class GetLogStatsTests(unittest.TestCase):
         result = self.__class__.get_log_stats(module="GhostModuleThatDoesNotExist")
         self.assertIn("No log templates found in codebase for module=GhostModuleThatDoesNotExist", result)
 
+    def test_filter_by_info_level(self):
+        """Test getting stats specifically for INFO logs."""
+        result = self.__class__.get_log_stats(level="INFO")
+        self.assertNotIn("No log templates found", result)
+        self.assertIn("Log Statistics for module=None, level=INFO:", result)
+        self.assertIn("[INFO]", result)
+        self.assertNotIn("[ERROR]", result)
+        self.assertNotIn("[FATAL]", result)
+
+    def test_filter_by_module_and_level(self):
+        """Test getting stats filtering by both module and level."""
+        result = self.__class__.get_log_stats(module="Program.cs", level="FATAL")
+        self.assertNotIn("No log templates found", result)
+        self.assertIn("Log Statistics for module=Program.cs, level=FATAL:", result)
+        self.assertIn("[FATAL]", result)
+        self.assertIn("bootloader\\ initialized", result)
+        self.assertNotIn("[ERROR]", result)
+        
 if __name__ == '__main__':
     unittest.main()

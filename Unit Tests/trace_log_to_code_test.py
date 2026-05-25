@@ -37,5 +37,18 @@ class TraceLogToCodeTests(unittest.TestCase):
         self.assertIn("This log does not match any extracted templates", result)
         self.assertIn("third-party dependency", result)
 
+    def test_trace_dynamic_info_log(self):
+        log_line = "[2026-05-24T18:05:00Z] [DEBUG] User 592 performed action aabbcc"
+        result = self.__class__.trace_log_to_code(log_line)
+        self.assertIn("Log successfully traced!", result)
+        self.assertIn("Method: Start", result)
+
+    def test_trace_main_loop_exception(self):
+        log_line = "[2026-05-24T18:10:00Z] [ERROR] Main loop exception: NullReferenceException occurred"
+        result = self.__class__.trace_log_to_code(log_line)
+        self.assertIn("Log successfully traced!", result)
+        self.assertIn("Method: Main", result)
+        self.assertIn("Main loop exception", result)
+
 if __name__ == '__main__':
     unittest.main()
