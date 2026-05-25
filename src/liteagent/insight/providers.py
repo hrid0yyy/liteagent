@@ -17,7 +17,16 @@ class InsightProviders:
             if os.environ.get("LITEAGENT_TESTING") == "1":
                 raise Exception("Testing mode enabled, skipping ML.")
             from chromadb.utils import embedding_functions
-            emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+            
+            embed_model = os.environ.get("LITEAGENT_EMBED_MODEL", "minilm").lower()
+            if embed_model == "nomic":
+                model_name = "nomic-ai/nomic-embed-text-v1.5"
+            elif embed_model == "bge":
+                model_name = "BAAI/bge-m3"
+            else:
+                model_name = "all-MiniLM-L6-v2"
+                
+            emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
         except Exception as e:
             print(f"[WARN] ML Model skipped ({str(e)}). Semantic Search will be mocked.")
             from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
