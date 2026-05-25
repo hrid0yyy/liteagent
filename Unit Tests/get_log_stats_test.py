@@ -6,16 +6,15 @@ import os
 # Ensure the src directory is in the path so we can import liteagent
 sys.path.insert(0, str(Path(os.path.abspath(__file__)).parent.parent / "src"))
 
-from liteagent.insight.agent import setup_insight_tools
+from liteagent.tools.factory import ToolFactory
 
 class GetLogStatsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         project_dir = Path(__file__).parent.parent / "tests" / "test-project" / "CodeShareTest"
-        tools = setup_insight_tools(project_dir)
+        tools = ToolFactory.create_all_tools(project_dir)
         
-        # get_log_stats is the 4th tool (index 3)
-        cls.get_log_stats = tools[3]
+        cls.get_log_stats = next(t for t in tools if t.__name__ == "get_log_stats")
 
     def test_global_error_stats(self):
         """Test getting stats for all errors globally."""

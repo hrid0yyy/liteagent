@@ -1,3 +1,3 @@
-from .agent import setup_insight_tools
+# Empty init
 
 __all__ = ["setup_insight_tools"]

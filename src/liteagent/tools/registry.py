@@ -109,18 +109,3 @@ class ToolRegistry:
         return func
 
 registry = ToolRegistry()
-
-# Registering tools
-from .workspace import get_workspace_info, search_in_files, list_files
-from .file_ops import read_file, write_file, rename_path, delete_path, modify_file
-from .shell import run_shell_command
-
-registry.register(get_workspace_info)
-registry.register(search_in_files)
-registry.register(list_files)
-registry.register(read_file)
-registry.register(write_file)
-registry.register(rename_path)
-registry.register(delete_path)
-registry.register(modify_file)
-registry.register(run_shell_command)

@@ -5,14 +5,14 @@ import os
 
 sys.path.insert(0, str(Path(os.path.abspath(__file__)).parent.parent / "src"))
 
-from liteagent.insight.agent import setup_insight_tools
+from liteagent.tools.factory import ToolFactory
 
 class TraceLogToCodeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         project_dir = Path(__file__).parent.parent / "tests" / "test-project" / "CodeShareTest"
-        tools = setup_insight_tools(project_dir)
-        cls.trace_log_to_code = tools[4]
+        tools = ToolFactory.create_all_tools(project_dir)
+        cls.trace_log_to_code = next(t for t in tools if t.__name__ == "trace_log_to_code")
         # Hack to access graph_store for debugging
         cls.project_dir = project_dir
 

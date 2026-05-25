@@ -12,16 +12,14 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from ..core.config import settings
 from ..core.state import app_state
-from ..providers.ollama import OllamaProvider
-from ..providers.nvidia_nim import NvidiaNimProvider
-from ..providers.openrouter import OpenRouterProvider
+# LLM providers are now imported via the factory
 from ..graph.builder import create_graph
 from ..core.logger import start_session_logger, end_session_logger, log_event, log_error
 from .formatter import format_message, format_tool_output, console
 from .server import start_server
 from ..core.session import session_service
-from ..insight.agent import setup_insight_tools
 from ..tools.registry import registry
+from ..tools.factory import ToolFactory
 from pathlib import Path
 
 # Suppress annoying dependency warnings
@@ -44,10 +42,10 @@ def do(
     no_insight: bool = typer.Option(False, "--no-insight", help="Disable insight tools.")
 ):
     """Run a single task using the agent."""
-    if not no_insight:
-        insight_tools = setup_insight_tools(Path(os.getcwd()))
-        for t in insight_tools:
-            registry.register(t)
+    # We initialize all tools dynamically with the project_dir
+    tools = ToolFactory.create_all_tools(Path(os.getcwd()), include_insight=not no_insight)
+    for t in tools:
+        registry.register(t)
     try:
         asyncio.run(_run_task(task, provider_name, model, resume, inspector))
     except KeyboardInterrupt:
@@ -62,10 +60,10 @@ def chat(
     no_insight: bool = typer.Option(False, "--no-insight", help="Disable insight tools.")
 ):
     """Open an interactive chat session with the agent."""
-    if not no_insight:
-        insight_tools = setup_insight_tools(Path(os.getcwd()))
-        for t in insight_tools:
-            registry.register(t)
+    # We initialize all tools dynamically with the project_dir
+    tools = ToolFactory.create_all_tools(Path(os.getcwd()), include_insight=not no_insight)
+    for t in tools:
+        registry.register(t)
     try:
         asyncio.run(_run_chat(provider_name, model, resume, inspector))
     except KeyboardInterrupt:
@@ -318,14 +316,11 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
         console.print(f"Session saved. To resume: [bold cyan]liteagent chat --resume {session_id}[/bold cyan]")
 
 def _get_provider(provider_name: str, model: Optional[str]):
-    if provider_name == "ollama":
-        return OllamaProvider(model=model)
-    elif provider_name == "nvidia":
-        return NvidiaNimProvider(model=model)
-    elif provider_name == "openrouter":
-        return OpenRouterProvider(model=model)
-    else:
-        console.print(f"[red]Error:[/red] Unsupported provider: {provider_name}")
+    from ..providers.factory import LLMProviderFactory
+    try:
+        return LLMProviderFactory.create_provider(provider_name, model)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {str(e)}")
         raise typer.Exit(1)
 
 async def _execute_graph(graph, state, verbose=False):

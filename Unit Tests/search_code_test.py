@@ -6,7 +6,7 @@ import os
 # Ensure the src directory is in the path so we can import liteagent
 sys.path.insert(0, str(Path(os.path.abspath(__file__)).parent.parent / "src"))
 
-from liteagent.insight.agent import setup_insight_tools
+from liteagent.tools.factory import ToolFactory
 
 class SearchCodeTests(unittest.TestCase):
     @classmethod
@@ -15,10 +15,9 @@ class SearchCodeTests(unittest.TestCase):
         project_dir = Path(__file__).parent.parent / "tests" / "test-project" / "CodeShareTest"
         
         # Initialize tools
-        tools = setup_insight_tools(project_dir)
+        tools = ToolFactory.create_all_tools(project_dir)
         
-        # The search_code tool is the 1st tool returned by setup_insight_tools
-        cls.search_code = tools[0]
+        cls.search_code = next(t for t in tools if t.__name__ == "search_code")
 
     def test_search_for_validate_token(self):
         """Test if search_code can find the ValidateToken logic."""
