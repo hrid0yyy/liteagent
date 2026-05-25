@@ -5,9 +5,14 @@ from .providers import ToolProviderFactory
 def create_get_log_stats_tool(providers: ToolProviderFactory):
     def get_log_stats(module: Optional[str] = None, level: Optional[str] = None, last_hours: int = 24) -> str:
         """
-        The Universal Log Profiler.
-        Queries AST extracted log templates and calculates their occurrence stats from the log file.
-        Use module to filter by file or class name, and level (e.g. ERROR) to filter by severity.
+        Analyzes log frequencies to identify spammy logs or recurring issues.
+        It groups log entries by their source code template and counts occurrences.
+        Returns a statistical summary of log occurrences.
+        
+        Args:
+            module: Optional file name or class name to filter templates (e.g. 'auth_service.py').
+            level: Optional severity level to filter templates (e.g. 'ERROR', 'WARN').
+            last_hours: Calculate stats only for logs from the last N hours.
         """
         try:
             templates = providers.insight.graph_store.get_log_templates(module, level)

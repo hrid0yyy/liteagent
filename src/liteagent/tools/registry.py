@@ -89,7 +89,13 @@ class ToolRegistry:
             else:
                 param_info["type"] = "string"
             
-            param_info["description"] = f"Parameter: {param_name}"
+            desc = f"Parameter: {param_name}"
+            if func.__doc__:
+                import re
+                match = re.search(rf"^\s*{param_name}\s*[:\-]\s*(.+)$", func.__doc__, re.MULTILINE)
+                if match:
+                    desc = match.group(1).strip()
+            param_info["description"] = desc
             
             # Add sample input
             if name in SAMPLE_INPUTS and param_name in SAMPLE_INPUTS[name]:

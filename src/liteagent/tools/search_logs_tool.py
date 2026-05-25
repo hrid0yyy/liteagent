@@ -4,10 +4,16 @@ from .providers import ToolProviderFactory
 def create_search_logs_tool(providers: ToolProviderFactory):
     def search_logs(query: str, is_plain: bool = True, context_lines: int = 2, level: Optional[str] = None, last_hours: Optional[int] = None, error_code: Optional[str] = None, limit: int = 50) -> str:
         """
-        Queries the FTS5 log index.
-        Use is_plain=True for instant keyword/error code lookup.
-        Use is_plain=False for Python Regex directly against raw log lines.
-        context_lines controls how many lines before and after the match are returned.
+        Searches through application log files for errors, keywords, or patterns.
+        
+        Args:
+            query: The search term or pattern to look for.
+            is_plain: True for simple keyword matching, False for Python regex matching.
+            context_lines: Number of surrounding lines to include before and after the match.
+            level: Filter by log severity (e.g. 'ERROR', 'WARN', 'INFO').
+            last_hours: Filter to logs within the last N hours.
+            error_code: Filter by a specific error code if applicable.
+            limit: Maximum number of matches to return.
         """
         try:
             results = providers.insight.log_index.search(query, is_plain, context_lines, level, last_hours, error_code, limit)

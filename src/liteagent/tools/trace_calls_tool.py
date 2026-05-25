@@ -4,9 +4,14 @@ from .providers import ToolProviderFactory
 def create_trace_calls_tool(providers: ToolProviderFactory):
     def trace_calls(symbol: str, direction: str = "both", depth: int = 3, max_nodes: int = 50) -> str:
         """
-        Traverses the AST call graph.
-        'callers' shows what relies on or uses the symbol.
-        'callees' shows what the symbol uses.
+        Traces the execution flow of a specific function or class.
+        Returns a JSON tree representing the call graph.
+        
+        Args:
+            symbol: The exact name of the function, class, or method to trace.
+            direction: 'callers' (who uses this), 'callees' (what this uses), or 'both'.
+            depth: Maximum depth of the call graph to traverse (default 3).
+            max_nodes: Maximum total nodes to return to prevent giant graphs.
         """
         try:
             results = providers.insight.graph_store.trace_calls(symbol, direction, depth, max_nodes)

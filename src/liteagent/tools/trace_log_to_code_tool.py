@@ -4,8 +4,10 @@ from .providers import ToolProviderFactory
 def create_trace_log_to_code_tool(providers: ToolProviderFactory):
     def trace_log_to_code(log_string: str) -> str:
         """
-        Cross-references an exact log string with AST-extracted templates to find
-        exactly which file and method generated it.
+        Finds the exact source code location that generated a specific log message.
+        
+        Args:
+            log_string: The exact log message string (or a large portion of it) from the logs.
         """
         try:
             templates = providers.insight.graph_store.get_log_templates()
