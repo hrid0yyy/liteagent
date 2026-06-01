@@ -24,7 +24,11 @@ class InsightProviders:
             elif embed_model == "bge":
                 model_name = "BAAI/bge-m3"
             else:
-                model_name = "all-MiniLM-L6-v2"
+                local_model_path = project_dir / "models" / "all-MiniLM-L6-v2"
+                if local_model_path.exists():
+                    model_name = str(local_model_path)
+                else:
+                    model_name = "all-MiniLM-L6-v2"
                 
             emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
         except Exception as e:
