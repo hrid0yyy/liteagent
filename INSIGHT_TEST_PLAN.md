@@ -17,32 +17,15 @@ The test project is a .NET Console application located in `tests/test-project/Co
 - **Input:** `query="how are logs being spammed"`
 - **Expected:** Should return the `LogSpammer` class implementation.
 
-### Tool 2: `trace_calls`
-**Goal:** Verify AST traversal and relationship mapping.
-- **Input:** `symbol="ProcessNextBatch"`, `direction="both"`
-- **Expected:** 
-  - Callers: `Main`
-  - Callees: `ValidateToken`, `SaveData`
-
-### Tool 3: `get_project_map`
+### Tool 2: `get_project_map`
 **Goal:** Verify directory structure overview.
 - **Input:** `path="tests/test-project"`
 - **Expected:** List the `CodeShareTest` folder and its contents.
 
-### Tool 4: `search_logs`
+### Tool 3: `search_logs`
 **Goal:** Verify FTS5 indexing and high-volume retrieval.
 - **Input:** `query="Connection reset"`, `is_plain=true`
 - **Expected:** List multiple occurrences of the random error injected by the spammer.
-
-### Tool 5: `get_log_errors`
-**Goal:** Verify error aggregation and statistics.
-- **Input:** `path="C:/temp/codeshare-logs/app.log"`, `last_hours=1`
-- **Expected:** A JSON summary showing the count of "Connection reset" and "Main loop exception" errors.
-
-### Tool 6: `trace_error_to_code`
-**Goal:** Verify the link between logs and source code.
-- **Input:** `error_string="Database write failed due to corrupted data"`
-- **Expected:** Point directly to `DatabaseService.SaveData` in `Program.cs`.
 
 ## 3. Execution
 1. Open the Tool Inspector (`liteagent chat -i`).

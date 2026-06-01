@@ -3,7 +3,6 @@ import threading
 from .indexer.graph_store import KnowledgeGraph
 from .indexer.ast_parser import ASTParser
 from .logs.log_index import LogIndex
-from .logs.analyzer import LogAnalyzer
 from .retrieval.retriever import HybridRetriever
 
 class InsightProviders:
@@ -84,5 +83,4 @@ class InsightProviders:
             pass
 
         self.log_index = LogIndex(insight_dir / "log_index.db")
-        self.log_analyzer = LogAnalyzer(self.log_index)
         self.retriever = HybridRetriever(insight_dir, self.code_collection)

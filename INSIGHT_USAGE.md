@@ -26,26 +26,14 @@ The agent now has native access to the following 6 powerful tools:
    - **What it does:** Performs a hybrid vector and keyword search across your codebase.
    - **When the agent uses it:** Whenever you ask "where is the payment logic?" or "how does user authentication work?".
 
-2. **`trace_calls(symbol: str, direction: str = "both")`**
-   - **What it does:** Traverses the call graph to find dependencies.
-   - **When the agent uses it:** If you ask "what calls the `saveUser` function?" or "what does `processOrder` rely on?".
-
-3. **`get_project_map(path: str = ".")`**
+2. **`get_project_map(path: str = ".")`**
    - **What it does:** Returns a shallow, depth-1 map of the specified directory.
    - **When the agent uses it:** To understand the high-level structure of your application incrementally (Progressive Disclosure).
 
 ### Log Analytics Tools
-4. **`get_log_errors(path: str = "auto", last_hours: int = 24)`**
-   - **What it does:** Summarizes and groups all recent `[ERROR]` or `[FATAL]` logs.
-   - **When the agent uses it:** When you ask "Why did the server crash?" or "Are there any errors?". It prevents the agent from being flooded with raw log lines by compressing them into a statistical summary.
-
-5. **`search_logs(query: str, is_plain: bool = True)`**
+3. **`search_logs(query: str, is_plain: bool = True)`**
    - **What it does:** Queries the log index for specific keywords, error codes, or regex patterns.
    - **When the agent uses it:** When searching for a specific user ID or an exact error code in the logs.
-
-6. **`trace_error_to_code(error_string: str)`**
-   - **What it does:** A magic bridge tool that connects logs to source code. It takes an error string from the logs and cross-references it with your code to find the exact file and line number that threw the error.
-   - **When the agent uses it:** Automatically called by the agent after finding a critical error via `get_log_errors` to give you the exact source code location.
 
 ## Log Configuration
 
@@ -75,12 +63,12 @@ Once this file is created, navigate to `D:\project_a` in your terminal and run `
 
 Here is how you can interact with the agent using these tools:
 
-> **You:** "The server crashed last night. Find the most common error and tell me which line of code caused it."
+> **You:** "The server crashed last night. Find any errors in the logs and tell me what happened."
 > 
 > **Agent:** 
-> 1. Uses `get_log_errors(last_hours=12)` to get a summarized list of errors.
-> 2. Identifies "HTTP_500 Payment Timeout" as the critical issue.
-> 3. Uses `trace_error_to_code("HTTP_500 Payment Timeout")` to locate the exact file and line.
+> 1. Uses `search_logs(query="ERROR")` to find recent error logs.
+> 2. Identifies "HTTP_500 Payment Timeout" as a critical issue.
+> 3. Uses `search_code(query="Payment Timeout")` to locate the relevant code.
 > 4. Reads the file context using `read_file`.
 > 5. Explains the root cause to you.
 

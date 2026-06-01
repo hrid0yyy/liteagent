@@ -10,10 +10,7 @@ from .delete_path_tool import create_delete_path_tool
 from .modify_file_tool import create_modify_file_tool
 from .run_shell_command_tool import create_run_shell_command_tool
 from .search_code_tool import create_search_code_tool
-from .trace_calls_tool import create_trace_calls_tool
 from .search_logs_tool import create_search_logs_tool
-from .get_log_stats_tool import create_get_log_stats_tool
-from .trace_log_to_code_tool import create_trace_log_to_code_tool
 
 class ToolFactory:
     @staticmethod
@@ -33,9 +30,6 @@ class ToolFactory:
         if include_insight:
             tools.extend([
                 create_search_code_tool(providers),
-                create_trace_calls_tool(providers),
                 create_search_logs_tool(providers),
-                create_get_log_stats_tool(providers),
-                create_trace_log_to_code_tool(providers)
             ])
         return tools
