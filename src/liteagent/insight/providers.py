@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 from .indexer.graph_store import KnowledgeGraph
 from .indexer.ast_parser import ASTParser
 from .logs.log_index import LogIndex
@@ -46,7 +47,9 @@ class InsightProviders:
 
         self.graph_store = KnowledgeGraph(insight_dir / "knowledge.db")
         self.ast_parser = ASTParser(self.graph_store, self.code_collection)
-        self.ast_parser.parse_directory(project_dir)
+        
+        # Parse directory in background to avoid blocking CLI startup
+        threading.Thread(target=self.ast_parser.parse_directory, args=(project_dir,), daemon=True).start()
         
         try:
             from watchdog.observers import Observer
@@ -56,7 +59,7 @@ class InsightProviders:
 
             class CodeChangeHandler(FileSystemEventHandler):
                 valid_exts = (".cs", ".csproj", ".sln", ".json", ".config", ".xml", ".cshtml", ".razor")
-                ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent"}
+                ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent", "models"}
                 
                 def _is_valid(self, path_str: str) -> bool:
                     p = Path(path_str)

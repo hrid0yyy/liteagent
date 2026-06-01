@@ -267,6 +267,23 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
             if user_input.lower() in ["exit", "quit"]:
                 break
             
+            # Handle slash commands
+            if user_input.strip().startswith("/config-add-log"):
+                parts = user_input.strip().split(maxsplit=1)
+                if len(parts) < 2:
+                    console.print("[red]Error:[/red] Please provide a log file path. Usage: /config-add-log <path>")
+                else:
+                    log_path = parts[1]
+                    abs_path = str(Path(log_path).absolute())
+                    if abs_path not in settings.insight_log_paths:
+                        settings.insight_log_paths.append(abs_path)
+                        console.print(f"[green]Added log path:[/green] {abs_path}")
+                        if not Path(abs_path).exists():
+                            console.print(f"[yellow]Warning:[/yellow] File does not exist yet: {abs_path}")
+                    else:
+                        console.print(f"[yellow]Log path already exists in configuration:[/yellow] {abs_path}")
+                continue
+            
             app_state.turn_index += 1
             state["messages"].append({"role": "user", "content": user_input})
             state["is_complete"] = False

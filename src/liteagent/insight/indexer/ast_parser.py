@@ -13,7 +13,7 @@ class ASTParser:
         
     def parse_directory(self, root_dir: Path):
         valid_exts = (".cs", ".csproj", ".sln", ".json", ".config", ".xml", ".cshtml", ".razor")
-        ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent"}
+        ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent", "models"}
         for path in root_dir.rglob("*"):
             if any(part in ignore_dirs for part in path.parts):
                 continue
