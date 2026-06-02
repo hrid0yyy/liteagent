@@ -19,7 +19,13 @@ def create_search_code_tool(providers: ToolProviderFactory):
             
             output = []
             for r in results:
-                output.append(f"File: {r['file_path']}\nSymbol: {r.get('symbol_name', 'Unknown')}\nCode:\n{r['source_code']}\n---")
+                header = f"File: {r['file_path']}"
+                if r.get("class_name"):
+                    header += f"\nClass: {r['class_name']}"
+                header += f"\nSymbol: {r.get('symbol_name', 'Unknown')}"
+                if r.get("context_note"):
+                    header += f"\n[Context: {r['context_note']}]"
+                output.append(f"{header}\nCode:\n{r['source_code']}\n---")
             return "\n".join(output)
         except Exception as e:
             return f"Error searching code: {str(e)}"

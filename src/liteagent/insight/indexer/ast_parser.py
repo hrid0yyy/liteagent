@@ -15,9 +15,14 @@ class ASTParser:
         valid_exts = (".cs", ".csproj", ".sln", ".json", ".config", ".xml", ".cshtml", ".razor")
         ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent", "models"}
         for path in root_dir.rglob("*"):
-            if any(part in ignore_dirs for part in path.parts):
+            try:
+                rel_path = path.relative_to(root_dir)
+                if any(part in ignore_dirs for part in rel_path.parts):
+                    continue
+            except ValueError:
                 continue
-            if path.suffix in valid_exts:
+                
+            if path.is_file() and path.suffix in valid_exts:
                 self.parse_file(path)
             
     def parse_file(self, file_path: Path):
@@ -42,12 +47,66 @@ class ASTParser:
             line_count = len(code_str.split('\n'))
             self.graph_store.insert_symbol(file_path.name, qname, "File", str(file_path), 1, line_count, code_str)
             if self.code_collection:
-                self.code_collection.upsert(ids=[qname], documents=[code_str], metadatas=[{"name": file_path.name, "file_path": str(file_path)}])
+                self.code_collection.upsert(
+                    ids=[qname], 
+                    documents=[code_str], 
+                    metadatas=[{
+                        "name": file_path.name, 
+                        "file_path": str(file_path),
+                        "method_name": file_path.name # Use filename as method_name for non-cs files
+                    }]
+                )
             return
             
         tree = self.parser.parse(code_str.encode("utf8"))
         self._extract_symbols_and_relations(tree.root_node, code_str, str(file_path))
         
+    def _split_with_overlap(self, text: str, chunk_size: int = 800, overlap: int = 200):
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = start + chunk_size
+            chunks.append(text[start:end])
+            if end >= len(text):
+                break
+            start += chunk_size - overlap
+        return chunks
+
+    def _index_method_chunks(self, method_name, class_name, signature, source, file_path):
+        if not self.code_collection:
+            return
+        chunks = self._split_with_overlap(source)
+        for i, chunk in enumerate(chunks):
+            # Prepend signature to every chunk so each embedding carries method context
+            enriched = f"{signature}\n{chunk}"
+            chunk_id = f"method.{method_name}::chunk_{i}::{file_path}"
+            self.code_collection.upsert(
+                ids=[chunk_id],
+                documents=[enriched],
+                metadatas=[{
+                    "file_path": file_path,
+                    "class_name": class_name or "",
+                    "method_name": method_name,
+                    "chunk_index": i
+                }]
+            )
+
+    def _index_class_summary(self, class_name, method_signatures, file_path):
+        if not self.code_collection:
+            return
+        summary = f"class {class_name}:\n" + "\n".join(method_signatures)
+        chunk_id = f"class_summary.{class_name}::{file_path}"
+        self.code_collection.upsert(
+            ids=[chunk_id],
+            documents=[summary],
+            metadatas=[{
+                "file_path": file_path,
+                "class_name": class_name,
+                "method_name": "",   # marks it as a class-level entry
+                "chunk_index": -1
+            }]
+        )
+
     def _extract_symbols_and_relations(self, root_node, code_str, file_path):
         lines = code_str.split('\n')
         
@@ -59,11 +118,18 @@ class ASTParser:
                 if child.type == "identifier":
                     return code_str[child.start_byte:child.end_byte]
             return None
+
+        def get_method_signature(node):
+            body_node = node.child_by_field_name("body")
+            if body_node:
+                return code_str[node.start_byte:body_node.start_byte].strip()
+            return lines[node.start_point[0]].strip()
             
+        current_class = None
         current_method = None
         
         def traverse(node):
-            nonlocal current_method
+            nonlocal current_class, current_method
             
             if node.type == "class_declaration":
                 name = get_identifier(node)
@@ -73,8 +139,22 @@ class ASTParser:
                     source = "\n".join(lines[start_line-1:end_line])
                     qname = f"class.{name}"
                     self.graph_store.insert_symbol(name, qname, "Class", file_path, start_line, end_line, source)
+                    
+                    # Index class summary
                     if self.code_collection:
-                        self.code_collection.upsert(ids=[qname], documents=[source], metadatas=[{"name": name, "file_path": file_path}])
+                        sigs = []
+                        # Look for method children to build a "table of contents"
+                        for child in node.children:
+                            if child.type == "method_declaration":
+                                sigs.append(get_method_signature(child))
+                        self._index_class_summary(name, sigs, file_path)
+                    
+                    prev_class = current_class
+                    current_class = name
+                    for child in node.children:
+                        traverse(child)
+                    current_class = prev_class
+                return
                     
             elif node.type == "method_declaration":
                 name = get_identifier(node)
@@ -83,9 +163,11 @@ class ASTParser:
                     end_line = node.end_point[0] + 1
                     source = "\n".join(lines[start_line-1:end_line])
                     qname = f"method.{name}"
-                    self.graph_store.insert_symbol(name, qname, "Function", file_path, start_line, end_line, source)
+                    self.graph_store.insert_symbol(name, qname, "Function", file_path, start_line, end_line, source, current_class)
+                    
                     if self.code_collection:
-                        self.code_collection.upsert(ids=[qname], documents=[source], metadatas=[{"name": name, "file_path": file_path}])
+                        sig = get_method_signature(node)
+                        self._index_method_chunks(name, current_class, sig, source, file_path)
                     
                     prev_method = current_method
                     current_method = name

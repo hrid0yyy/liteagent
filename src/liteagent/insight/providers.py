@@ -47,8 +47,11 @@ class InsightProviders:
         self.graph_store = KnowledgeGraph(insight_dir / "knowledge.db")
         self.ast_parser = ASTParser(self.graph_store, self.code_collection)
         
-        # Parse directory in background to avoid blocking CLI startup
-        threading.Thread(target=self.ast_parser.parse_directory, args=(project_dir,), daemon=True).start()
+        # Parse directory
+        if os.environ.get("LITEAGENT_SYNC_INDEXING") == "1" or os.environ.get("LITEAGENT_TESTING") == "1":
+            self.ast_parser.parse_directory(project_dir)
+        else:
+            threading.Thread(target=self.ast_parser.parse_directory, args=(project_dir,), daemon=True).start()
         
         try:
             from watchdog.observers import Observer

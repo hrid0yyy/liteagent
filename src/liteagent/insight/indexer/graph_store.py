@@ -21,9 +21,15 @@ class KnowledgeGraph:
                     file_path TEXT NOT NULL,
                     start_line INTEGER,
                     end_line INTEGER,
-                    source_code TEXT
+                    source_code TEXT,
+                    class_name TEXT
                 )
             """)
+            # Migration: add class_name if it doesn't exist
+            try:
+                self.conn.execute("ALTER TABLE symbols ADD COLUMN class_name TEXT")
+            except sqlite3.OperationalError:
+                pass # Already exists
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS relationships (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,19 +49,20 @@ class KnowledgeGraph:
                 )
             """)
 
-    def insert_symbol(self, name: str, qualified_name: str, kind: str, file_path: str, start_line: int, end_line: int, source_code: str):
+    def insert_symbol(self, name: str, qualified_name: str, kind: str, file_path: str, start_line: int, end_line: int, source_code: str, class_name: Optional[str] = None):
         with self.conn:
             self.conn.execute("""
-                INSERT INTO symbols (name, qualified_name, kind, file_path, start_line, end_line, source_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO symbols (name, qualified_name, kind, file_path, start_line, end_line, source_code, class_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(qualified_name) DO UPDATE SET
                     name=excluded.name,
                     kind=excluded.kind,
                     file_path=excluded.file_path,
                     start_line=excluded.start_line,
                     end_line=excluded.end_line,
-                    source_code=excluded.source_code
-            """, (name, qualified_name, kind, file_path, start_line, end_line, source_code))
+                    source_code=excluded.source_code,
+                    class_name=excluded.class_name
+            """, (name, qualified_name, kind, file_path, start_line, end_line, source_code, class_name))
 
     def insert_relationship(self, source: str, target: str, kind: str, file_path: str):
         with self.conn:
