@@ -89,7 +89,13 @@ class ToolRegistry:
             else:
                 param_info["type"] = "string"
             
-            param_info["description"] = f"Parameter: {param_name}"
+            desc = f"Parameter: {param_name}"
+            if func.__doc__:
+                import re
+                match = re.search(rf"^\s*{param_name}\s*[:\-]\s*(.+)$", func.__doc__, re.MULTILINE)
+                if match:
+                    desc = match.group(1).strip()
+            param_info["description"] = desc
             
             # Add sample input
             if name in SAMPLE_INPUTS and param_name in SAMPLE_INPUTS[name]:
@@ -109,18 +115,3 @@ class ToolRegistry:
         return func
 
 registry = ToolRegistry()
-
-# Registering tools
-from .workspace import get_workspace_info, search_in_files, list_files
-from .file_ops import read_file, write_file, rename_path, delete_path, modify_file
-from .shell import run_shell_command
-
-registry.register(get_workspace_info)
-registry.register(search_in_files)
-registry.register(list_files)
-registry.register(read_file)
-registry.register(write_file)
-registry.register(rename_path)
-registry.register(delete_path)
-registry.register(modify_file)
-registry.register(run_shell_command)

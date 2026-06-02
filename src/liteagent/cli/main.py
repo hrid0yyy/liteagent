@@ -12,14 +12,15 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from ..core.config import settings
 from ..core.state import app_state
-from ..providers.ollama import OllamaProvider
-from ..providers.nvidia_nim import NvidiaNimProvider
-from ..providers.openrouter import OpenRouterProvider
+# LLM providers are now imported via the factory
 from ..graph.builder import create_graph
 from ..core.logger import start_session_logger, end_session_logger, log_event, log_error
 from .formatter import format_message, format_tool_output, console
 from .server import start_server
 from ..core.session import session_service
+from ..tools.registry import registry
+from ..tools.factory import ToolFactory
+from pathlib import Path
 
 # Suppress annoying dependency warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -37,9 +38,14 @@ def do(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
     resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
-    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector."),
+    no_insight: bool = typer.Option(False, "--no-insight", help="Disable insight tools.")
 ):
     """Run a single task using the agent."""
+    # We initialize all tools dynamically with the project_dir
+    tools = ToolFactory.create_all_tools(Path(os.getcwd()), include_insight=not no_insight)
+    for t in tools:
+        registry.register(t)
     try:
         asyncio.run(_run_task(task, provider_name, model, resume, inspector))
     except KeyboardInterrupt:
@@ -50,9 +56,14 @@ def chat(
     provider_name: str = typer.Option(settings.default_provider, "--provider", "-p", help="LLM provider to use."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name to use."),
     resume: Optional[str] = typer.Option(None, "--resume", "-r", help="Resume a session by ID or 'last'."),
-    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector.")
+    inspector: bool = typer.Option(False, "--inspector", "-i", help="Enable tool inspector."),
+    no_insight: bool = typer.Option(False, "--no-insight", help="Disable insight tools.")
 ):
     """Open an interactive chat session with the agent."""
+    # We initialize all tools dynamically with the project_dir
+    tools = ToolFactory.create_all_tools(Path(os.getcwd()), include_insight=not no_insight)
+    for t in tools:
+        registry.register(t)
     try:
         asyncio.run(_run_chat(provider_name, model, resume, inspector))
     except KeyboardInterrupt:
@@ -256,6 +267,23 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
             if user_input.lower() in ["exit", "quit"]:
                 break
             
+            # Handle slash commands
+            if user_input.strip().startswith("/config-add-log"):
+                parts = user_input.strip().split(maxsplit=1)
+                if len(parts) < 2:
+                    console.print("[red]Error:[/red] Please provide a log file path. Usage: /config-add-log <path>")
+                else:
+                    log_path = parts[1]
+                    abs_path = str(Path(log_path).absolute())
+                    if abs_path not in settings.insight_log_paths:
+                        settings.insight_log_paths.append(abs_path)
+                        console.print(f"[green]Added log path:[/green] {abs_path}")
+                        if not Path(abs_path).exists():
+                            console.print(f"[yellow]Warning:[/yellow] File does not exist yet: {abs_path}")
+                    else:
+                        console.print(f"[yellow]Log path already exists in configuration:[/yellow] {abs_path}")
+                continue
+            
             app_state.turn_index += 1
             state["messages"].append({"role": "user", "content": user_input})
             state["is_complete"] = False
@@ -305,14 +333,11 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
         console.print(f"Session saved. To resume: [bold cyan]liteagent chat --resume {session_id}[/bold cyan]")
 
 def _get_provider(provider_name: str, model: Optional[str]):
-    if provider_name == "ollama":
-        return OllamaProvider(model=model)
-    elif provider_name == "nvidia":
-        return NvidiaNimProvider(model=model)
-    elif provider_name == "openrouter":
-        return OpenRouterProvider(model=model)
-    else:
-        console.print(f"[red]Error:[/red] Unsupported provider: {provider_name}")
+    from ..providers.factory import LLMProviderFactory
+    try:
+        return LLMProviderFactory.create_provider(provider_name, model)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {str(e)}")
         raise typer.Exit(1)
 
 async def _execute_graph(graph, state, verbose=False):

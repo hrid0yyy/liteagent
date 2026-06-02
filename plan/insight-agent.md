@@ -76,12 +76,9 @@ graph TD
 
     subgraph "Agent Tools (Internal)"
         B --> T1["search_code(query)"]
-        B --> T2["get_symbol(name)"]
-        B --> T3["trace_calls(fn_name, direction)"]
-        B --> T4["get_dependents(symbol)"]
+        B --> T2["get_symbol(name) [FOR FUTURE]"]
+        B --> T4["get_dependents(symbol) [FOR FUTURE]"]
         B --> T5["analyze_logs(path, filters)"]
-        B --> T6["get_log_summary(path)"]
-        B --> T7["trace_workflow(entry_point)"]
         B --> T8["get_project_map()"]
         B --> T9["read_file(path, lines)"]
         B --> T10["search_in_files(pattern)"]
@@ -1085,32 +1082,22 @@ These 9 new tools are injected into the agent's LangGraph configuration. They ar
 1. **`search_code`**
    - **Parameters:** `query: str`, `top_k: int = 8`
    - **Scope:** Performs a hybrid vector + BM25 keyword search across the entire AST-indexed codebase. Ideal for finding logic without knowing exact file names.
-2. **`get_symbol`**
+2. **`get_symbol`** [FOR FUTURE] no need to implement these now!
    - **Parameters:** `name: str`
    - **Scope:** Directly queries the SQLite Knowledge Graph for a specific class, function, or variable. Returns exact file paths, line numbers, and docstrings.
-3. **`trace_calls`**
-   - **Parameters:** `symbol: str`, `direction: str = "both"`, `depth: int = 3`, `max_nodes: int = 50`
-   - **Scope:** Traverses the AST call graph. `"callers"` shows what relies on or uses the symbol (acting as a "get dependents" tool); `"callees"` shows what the symbol uses. **Safety:** Enforces a hard budget (`max_nodes=50`) to prevent exponential tree explosion.
-4. **`get_class_hierarchy`**
+4. **`get_class_hierarchy`** [FOR FUTURE] no need to implement these now!
    - **Parameters:** `class_name: str`
    - **Scope:** Queries AST inheritance records to build a tree of parent and child classes (highly useful for C# and Java OOP structures).
-5. **`get_project_map`**
-   - **Parameters:** `path: str = "."`
-   - **Scope:** Returns a folder/module overview. **Safety:** Uses Progressive Disclosure. It strictly returns only Depth-1 of the requested `path` (no deep recursion). The agent must explicitly request sub-folders to drill down.
+5. **`get_project_map`** [DELETED]
+   - **Scope:** Merged into the core `get_workspace_info(max_depth=1)` tool to prevent redundancy and keep the agent's toolset lean.
 
 #### Log Analytics & Debugging
 6. **`search_logs`**
    - **Parameters:** `query: str`, `is_plain: bool = True`, `level: str = None`, `last_hours: int = None`, `error_code: str = None`, `limit: int = 50`
    - **Scope:** Queries the SQLite FTS5 log index. Use `is_plain=True` for instant keyword/error code lookup. Use `is_plain=False` to execute Python Regex directly against raw log lines (slower but highly flexible).
-7. **`trace_error_to_code`**
-   - **Parameters:** `error_string: str`
-   - **Scope:** The bridging tool. Given a log error, it searches logs for stack traces. If none exist, it cross-references the error string with the AST `logged_errors` index to find exactly which C#/Python function threw the error, returning the full execution context.
-8. **`get_log_errors`**
-    - **Parameters:** `path: str = "auto"`, `last_hours: int = 24`, `include_stats: bool = True`
-    - **Scope:** Groups and de-duplicates all recent `[ERROR]` or `[FATAL]` logs. If `include_stats=True`, it also returns aggregate statistics for formal error codes (e.g. `HTTP_500: 42 occurrences`). **Safety:** Uses Auto-Aggregation. If >50 unique errors are found, it skips returning raw traces and instead returns a compressed statistical summary.
 
 #### Execution Workflow
-9. **`trace_workflow`**
+9. **`trace_workflow`** [FOR FUTURE] no need to implement these now!
     - **Parameters:** `entry_point: str`, `max_depth: int = 5`
     - **Scope:** Follows the execution path from a specific entry point (like a controller method) and generates a Markdown Mermaid flowchart diagram of the logic.
 
@@ -1124,15 +1111,10 @@ call graphs, analyze logs, and understand workflows.
 
 When answering questions:
 1. ALWAYS use your tools to ground answers in actual code — never guess
-2. For "how does X work" questions → use search_code + trace_calls + read_file
-3. For "show me the flow" questions → use trace_workflow to generate diagrams
-4. For log analysis → use get_log_errors to find anomalies and search_logs for specific traces
-5. For log search → use search_logs:
-   - is_plain=True (default) for keywords, error codes, exact phrases
-   - is_plain=False for regex patterns like 'user_id=\d+ failed' or 'took \d{4,}ms'
-6. Provide file paths and line numbers for all code references
-7. Generate Mermaid diagrams for complex flows
-8. Be specific — cite function names, line numbers, and file paths
+2. For "how does X work" questions → use search_code + read_file
+3. For log analysis → use search_logs to find errors or specific traces
+4. Provide file paths and line numbers for all code references
+5. Be specific — cite function names, line numbers, and file paths
 ```
 
 ---
