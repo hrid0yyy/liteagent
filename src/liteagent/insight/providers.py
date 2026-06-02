@@ -16,21 +16,45 @@ class InsightProviders:
         try:
             if os.environ.get("LITEAGENT_TESTING") == "1":
                 raise Exception("Testing mode enabled, skipping ML.")
-            from chromadb.utils import embedding_functions
             
             embed_model = os.environ.get("LITEAGENT_EMBED_MODEL", "minilm").lower()
+            local_model_path = None
             if embed_model == "nomic":
                 model_name = "nomic-ai/nomic-embed-text-v1.5"
             elif embed_model == "bge":
                 model_name = "BAAI/bge-m3"
             else:
+                # Check for local model in project dir, then in package dir
                 local_model_path = project_dir / "models" / "all-MiniLM-L6-v2"
+                if not local_model_path.exists():
+                    pkg_model_path = Path(__file__).resolve().parent.parent.parent.parent / "models" / "all-MiniLM-L6-v2"
+                    if pkg_model_path.exists():
+                        local_model_path = pkg_model_path
+                
                 if local_model_path.exists():
                     model_name = str(local_model_path)
                 else:
                     model_name = "all-MiniLM-L6-v2"
-                
-            emb_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
+
+            # Use SentenceTransformer directly instead of chromadb's wrapper
+            # This gives us full control over local_files_only and avoids
+            # chromadb's own import check that produces confusing error messages
+            from sentence_transformers import SentenceTransformer
+            from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+            
+            local_only = local_model_path is not None and local_model_path.exists()
+            st_model = SentenceTransformer(model_name, local_files_only=local_only)
+            
+            class LocalSentenceTransformerFn(EmbeddingFunction):
+                def __init__(self, model):
+                    self._model = model
+                def __call__(self, input: Documents) -> Embeddings:
+                    return self._model.encode(input).tolist()
+                def name(self) -> str:
+                    return "sentence_transformer"
+            
+            emb_fn = LocalSentenceTransformerFn(st_model)
+            print("[INFO] Semantic Search enabled (local model loaded).")
         except Exception as e:
             print(f"[WARN] ML Model skipped ({str(e)}). Semantic Search will be mocked.")
             from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
@@ -61,7 +85,7 @@ class InsightProviders:
 
             class CodeChangeHandler(FileSystemEventHandler):
                 valid_exts = (".cs", ".csproj", ".sln", ".json", ".config", ".xml", ".cshtml", ".razor")
-                ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent", "models"}
+                ignore_dirs = {".git", ".vs", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent", "models", "packages"}
                 
                 def _is_valid(self, path_str: str) -> bool:
                     p = Path(path_str)

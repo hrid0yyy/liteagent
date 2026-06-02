@@ -4,6 +4,7 @@ from .get_workspace_info_tool import create_get_workspace_info_tool
 from .search_in_files_tool import create_search_in_files_tool
 from .list_files_tool import create_list_files_tool
 from .read_file_tool import create_read_file_tool
+from .read_log_lineRange_tool import create_read_log_lineRange_tool
 from .write_file_tool import create_write_file_tool
 from .rename_path_tool import create_rename_path_tool
 from .delete_path_tool import create_delete_path_tool
@@ -21,6 +22,7 @@ class ToolFactory:
             create_search_in_files_tool(providers),
             create_list_files_tool(providers),
             create_read_file_tool(providers),
+            create_read_log_lineRange_tool(providers),
             create_write_file_tool(providers),
             create_rename_path_tool(providers),
             create_delete_path_tool(providers),

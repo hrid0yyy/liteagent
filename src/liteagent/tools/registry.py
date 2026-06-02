@@ -22,6 +22,11 @@ SAMPLE_INPUTS = {
         "start_line": "1",
         "end_line": "50"
     },
+    "read_log_lineRange": {
+        "path": "logs/app.log",
+        "startLine": "1",
+        "range": "3"
+    },
     "write_file": {
         "file_path": "new_file.txt",
         "content": "Hello, World!"
@@ -36,6 +41,13 @@ SAMPLE_INPUTS = {
     "modify_file": {
         "file_path": "example.py",
         "edits": ">>> SEARCH\nold code\n+++ REPLACE\nnew code"
+    },
+    "search_logs": {
+        "query": "ERROR",
+        "is_plain": "true",
+        "context_lines": "2",
+        "last_hours": "24",
+        "limit": "1"
     },
     "run_shell_command": {
         "command": "dir",

@@ -2,9 +2,11 @@ from pathlib import Path
 from typing import List, Optional
 from .providers import ToolProviderFactory
 
+DEFAULT_READ_LINES = 100
+
 def create_read_file_tool(providers: ToolProviderFactory):
     def read_file(file_paths: List[str], start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
-        """Reads one or more files, optionally within a specific line range, prepending line numbers."""
+        """Reads one or more files, optionally within a specific line range, prepending line numbers. Do NOT use this tool to read log files; use read_log_lineRange instead. If no line range is specified, reads the first 100 lines by default."""
         start_line = int(start_line) if start_line not in (None, "") else None
         end_line = int(end_line) if end_line not in (None, "") else None
         all_output = []
@@ -17,8 +19,14 @@ def create_read_file_tool(providers: ToolProviderFactory):
             try:
                 raw_content = path.read_text(encoding="utf-8")
                 lines = raw_content.splitlines()
-                start = (start_line - 1) if start_line else 0
-                end = end_line if end_line else len(lines)
+                
+                # Default: if no range specified, read first 100 lines
+                if start_line is None and end_line is None:
+                    start = 0
+                    end = min(DEFAULT_READ_LINES, len(lines))
+                else:
+                    start = (start_line - 1) if start_line else 0
+                    end = end_line if end_line else len(lines)
                 
                 selected_lines = lines[start:end]
                 

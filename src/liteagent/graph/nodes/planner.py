@@ -20,6 +20,7 @@ async def planner_node(state: AgentState, provider: BaseProvider) -> Dict[str, A
             "If the user asks to see files or asks about the project, you MUST call 'get_workspace_info' FIRST.\n"
             "3. READ FRESHNESS FIRST: Use internal read-tracker freshness state to avoid unnecessary re-reads; only call 'read_file' when needed or when user explicitly asks to reread.\n"
             "4. READ BEFORE MODIFY: Always 'read_file' before 'modify_file' to ensure you have the exact content.\n"
+            "4b. LOG FILES: Use 'read_log_lineRange' to read log files, NOT 'read_file'. The read_log_lineRange tool reads a small range of lines (default 3, max 5) from a log file.\n"
             "5. REASONING: Briefly explain your thought process before calling a tool.\n"
             "6. CONVERSATION: For simple greetings (hi, hello) or questions about who you are, respond with text ONLY. No tools.\n"
             "7. COMPLETION: Once you have successfully executed the tools to fulfill the user's request, provide a final text summary and stop calling tools."

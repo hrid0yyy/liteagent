@@ -13,7 +13,7 @@ class ASTParser:
         
     def parse_directory(self, root_dir: Path):
         valid_exts = (".cs", ".csproj", ".sln", ".json", ".config", ".xml", ".cshtml", ".razor")
-        ignore_dirs = {".git", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent", "models"}
+        ignore_dirs = {".git", ".vs", "bin", "obj", "node_modules", ".venv", "__pycache__", ".liteagent", "models", "packages"}
         for path in root_dir.rglob("*"):
             try:
                 rel_path = path.relative_to(root_dir)
