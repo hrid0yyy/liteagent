@@ -7,7 +7,10 @@ class KnowledgeGraph:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Increase timeout and use check_same_thread=False for multi-threaded access
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
+        # Enable WAL mode for better concurrency (multiple readers + one writer)
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self._init_db()
 
     def _init_db(self):
@@ -70,6 +73,15 @@ class KnowledgeGraph:
                 INSERT INTO relationships (source, target, kind, file_path)
                 VALUES (?, ?, ?, ?)
             """, (source, target, kind, file_path))
+
+    def insert_relationships(self, relationships: List[tuple]):
+        """Batch insert relationships: List of (source, target, kind, file_path)"""
+        if not relationships: return
+        with self.conn:
+            self.conn.executemany("""
+                INSERT INTO relationships (source, target, kind, file_path)
+                VALUES (?, ?, ?, ?)
+            """, relationships)
             
     def insert_log_template(self, file_path: str, method_name: str, level: str, template: str):
         with self.conn:
@@ -77,6 +89,15 @@ class KnowledgeGraph:
                 INSERT INTO log_templates (file_path, method_name, level, template)
                 VALUES (?, ?, ?, ?)
             """, (file_path, method_name, level, template))
+
+    def insert_log_templates(self, templates: List[tuple]):
+        """Batch insert log templates: List of (file_path, method_name, level, template)"""
+        if not templates: return
+        with self.conn:
+            self.conn.executemany("""
+                INSERT INTO log_templates (file_path, method_name, level, template)
+                VALUES (?, ?, ?, ?)
+            """, templates)
             
     def clear_file(self, file_path: str):
         """Removes all symbols, relationships, and templates associated with a file."""

@@ -127,6 +127,8 @@ class ASTParser:
             
         current_class = None
         current_method = None
+        all_relationships = []
+        all_log_templates = []
         
         def traverse(node):
             nonlocal current_class, current_method
@@ -189,7 +191,7 @@ class ASTParser:
                                 callee_name = code_str[last_child.start_byte:last_child.end_byte]
                     
                     if callee_name:
-                        self.graph_store.insert_relationship(current_method, callee_name, "calls", file_path)
+                        all_relationships.append((current_method, callee_name, "calls", file_path))
                         
                         # Extract log templates
                         lower_callee = callee_name.lower()
@@ -214,9 +216,15 @@ class ASTParser:
                                         # re.escape turns {var} into \{var\}. We replace it with non-greedy wildcard (.*?)
                                         template = re.sub(r'\\\{.*?\\\}', '(.*?)', escaped_s)
                                         
-                                        self.graph_store.insert_log_template(file_path, current_method, lvl, template)
+                                        all_log_templates.append((file_path, current_method, lvl, template))
             
             for child in node.children:
                 traverse(child)
                 
         traverse(root_node)
+        
+        # Batch insert at the end of file traversal
+        if all_relationships:
+            self.graph_store.insert_relationships(all_relationships)
+        if all_log_templates:
+            self.graph_store.insert_log_templates(all_log_templates)
