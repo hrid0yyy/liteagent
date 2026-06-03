@@ -1,0 +1,1066 @@
+From 2ad79b8817fd76fef7dba6f7b007bb77a20070bf Mon Sep 17 00:00:00 2001
+From: "sm.mahbub" <sm.mahbub@SM-MAHBUB02>
+Date: Wed, 3 Jun 2026 15:37:39 +0600
+Subject: [PATCH] office update
+
+---
+ .env.example                                  |   7 +
+ .gitignore                                    |   3 +-
+ PLAN-THEN-EXECUTE.md                          |  77 ++++++++++
+ src/liteagent/core/config.py                  |   6 +-
+ src/liteagent/core/state.py                   |   2 +-
+ src/liteagent/providers/__init__.py           |   2 +
+ src/liteagent/providers/factory.py            |   3 +
+ src/liteagent/providers/github.py             |  84 +++++++++++
+ src/liteagent/providers/nvidia_nim.py         |   2 +-
+ src/liteagent/providers/openrouter.py         |   2 +-
+ src/liteagent/tools/delete_path_tool.py       |   7 +-
+ src/liteagent/tools/factory.py                |   4 +-
+ .../tools/get_workspace_info_tool.py          | 130 ++++++++++++++--
+ src/liteagent/tools/list_files_tool.py        | 121 ++++++++++++++-
+ src/liteagent/tools/modify_file_tool.py       |   4 +
+ src/liteagent/tools/read_file_tool.py         |  68 ++++-----
+ .../tools/read_log_lineRange_tool.py          |  10 +-
+ src/liteagent/tools/registry.py               |   6 +-
+ src/liteagent/tools/rename_path_tool.py       |   8 +-
+ src/liteagent/tools/run_shell_command_tool.py |   8 +-
+ src/liteagent/tools/search_in_files_tool.py   | 140 ++++++++++++++----
+ src/liteagent/tools/write_file_tool.py        |   8 +-
+ 22 files changed, 602 insertions(+), 100 deletions(-)
+ create mode 100644 PLAN-THEN-EXECUTE.md
+ create mode 100644 src/liteagent/providers/github.py
+
+diff --git a/.env.example b/.env.example
+index ba602be..0e939ce 100644
+--- a/.env.example
++++ b/.env.example
+@@ -6,3 +6,10 @@ OLLAMA_BASE_URL=http://localhost:11434
+ # Default Settings
+ DEFAULT_PROVIDER=ollama
+ DEFAULT_MODEL=llama3
++
++# GitHub Models API (for GithubModels provider)
++# Get your token from https://github.com/settings/tokens
++GITHUB_TOKEN=your_github_token_here
++
++# Set to 'false' if you get SSL certificate errors (e.g., behind corporate proxy)
++VERIFY_SSL=false
+diff --git a/.gitignore b/.gitignore
+index bf194cf..016d927 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -159,4 +159,5 @@ cython_debug/
+ .DS_Store
+ .antigravitycli/
+ tests/
+-.liteagent/
+\ No newline at end of file
++.liteagent/
++.git/
+\ No newline at end of file
+diff --git a/PLAN-THEN-EXECUTE.md b/PLAN-THEN-EXECUTE.md
+new file mode 100644
+index 0000000..9bdcb3a
+--- /dev/null
++++ b/PLAN-THEN-EXECUTE.md
+@@ -0,0 +1,77 @@
++Now I have a thorough understanding of the entire codebase. Here's a comprehensive plan for implementing a **Plan-then-Execute** architecture:
++
++---
++
++## Architecture Design: Plan-then-Execute
++
++### Graph Flow
++```
++START → planner → step_executor → replanner → (is_complete?) → END
++                                               ↓ (not complete)
++                                          step_executor → replanner → ...
++```
++
++### Three Core Nodes
++
++**1. `planner_node`** (no tools — pure reasoning)
++- Takes the user request
++- Calls LLM **without tools** to generate a structured step-by-step plan
++- Output: `plan` = list of step descriptions, `current_step_index` = 0
++
++**2. `step_executor_node`** (with tools — executes one step)
++- Reads `plan[current_step_index]` as the current task
++- Calls LLM **with tools** to execute that specific step
++- Runs the tool calls and collects results
++- Output: tool results in `messages`, completed step info in `past_steps`
++
++**3. `replanner_node`** (no tools — reviews & decides)
++- Reviews what was accomplished vs. the remaining plan
++- Three possible outcomes:
++  - **Continue** → increment `current_step_index`, proceed to next step
++  - **Replan** → generate a new plan based on what happened
++  - **Complete** → set `is_complete = True`, provide final summary
++
++### State Changes (`core/state.py`)
++
++```python
++class AgentState(TypedDict):
++    messages: Annotated[List[dict], add]           # conversation history
++    plan: List[str]                                 # ordered step descriptions (overwritten by planner/replanner)
++    current_step_index: int                         # which step we're executing (overwritten by replanner)
++    past_steps: Annotated[List[dict], add]          # [{"step": "...", "result": "..."}, ...]
++    tool_outputs: Annotated[List[dict], add]        # tool execution results
++    errors: Annotated[List[str], add]               # errors
++    is_complete: bool                               # task completion flag
++```
++
++### Files to Create/Modify
++
++| File | Action | Description |
++|------|--------|-------------|
++| `core/state.py` | **Modify** | Add `plan`, `current_step_index`, `past_steps` fields; remove unused `plan: str` |
++| `graph/nodes/planner.py` | **Rewrite** | New planning node that generates structured plan without tools |
++| `graph/nodes/executor.py` | **Rewrite** | Simplified to execute the current step from the plan |
++| `graph/nodes/replanner.py` | **Create** | New node that reviews progress and decides continue/replan/complete |
++| `graph/builder.py` | **Rewrite** | New graph structure with 3 nodes and conditional edges |
++| `cli/main.py` | **Modify** | Update state initialization to include new fields; update event handling for new node names |
++
++### Key Design Principles
++
++1. **Separation of concerns**: Planning (what to do) is separate from execution (how to do it)
++2. **Replanning capability**: If a step fails or reveals new information, the replanner can adjust the plan dynamically
++3. **Structured progress tracking**: `past_steps` records what's been done, `current_step_index` tracks where we are
++4. **Clean state management**: `plan` and `current_step_index` are overwritten (not appended), while `messages`, `past_steps`, `tool_outputs`, and `errors` use the `add` reducer
++
++### Why This Is Better Than the Current ReAct
++
++| Aspect | Current (ReAct) | Proposed (Plan-Execute) |
++|--------|-----------------|------------------------|
++| Planning | None (reactive) | Explicit upfront plan |
++| Transparency | Hard to know overall progress | Clear plan with step tracking |
++| Error recovery | LLM decides on the fly | Replanner can restructure the plan |
++| Efficiency | May wander without clear direction | Focused execution per step |
++| Cost | More LLM calls (each decides next step) | Fewer decisions (plan once, execute, replan only if needed) |
++
++---
++
++Shall I proceed with the implementation? If so, please **toggle to Act mode**.
+\ No newline at end of file
+diff --git a/src/liteagent/core/config.py b/src/liteagent/core/config.py
+index 2c3a506..803d0db 100644
+--- a/src/liteagent/core/config.py
++++ b/src/liteagent/core/config.py
+@@ -14,11 +14,13 @@ class Settings(BaseSettings):
+     # LLM Providers
+     nvidia_api_key: Optional[str] = None
+     openrouter_api_key: Optional[str] = None
++    github_token: Optional[str] = None
++    verify_ssl: bool = True
+     ollama_base_url: str = "http://localhost:11434"
+     
+     # Default Provider
+-    default_provider: str = "ollama"
+-    default_model: str = "llama3" # Default for Ollama
++    default_provider: str = "github"
++    default_model: str = "openai/o4-mini" # Default for GitHub Models
+ 
+     # Session logging
+     log_enabled: bool = True
+diff --git a/src/liteagent/core/state.py b/src/liteagent/core/state.py
+index a2860ab..b0c150a 100644
+--- a/src/liteagent/core/state.py
++++ b/src/liteagent/core/state.py
+@@ -3,7 +3,7 @@ from operator import add
+ 
+ class AppState:
+     def __init__(self):
+-        self.auto_mode = False
++        self.auto_mode = True
+         self.read_tracker: Dict[str, Dict[str, Any]] = {}
+         self.session_id: str = ""
+         self.session_log_path: str = ""
+diff --git a/src/liteagent/providers/__init__.py b/src/liteagent/providers/__init__.py
+index 4599433..5be332e 100644
+--- a/src/liteagent/providers/__init__.py
++++ b/src/liteagent/providers/__init__.py
+@@ -2,6 +2,7 @@ from .base import BaseProvider
+ from .ollama import OllamaProvider
+ from .nvidia_nim import NvidiaNimProvider
+ from .openrouter import OpenRouterProvider
++from .github import GitHubModelsProvider
+ from .factory import LLMProviderFactory
+ 
+ __all__ = [
+@@ -9,5 +10,6 @@ __all__ = [
+     "OllamaProvider",
+     "NvidiaNimProvider",
+     "OpenRouterProvider",
++    "GitHubModelsProvider",
+     "LLMProviderFactory"
+ ]
+diff --git a/src/liteagent/providers/factory.py b/src/liteagent/providers/factory.py
+index 122d2c8..7767e8c 100644
+--- a/src/liteagent/providers/factory.py
++++ b/src/liteagent/providers/factory.py
+@@ -3,6 +3,7 @@ from .base import BaseProvider
+ from .ollama import OllamaProvider
+ from .nvidia_nim import NvidiaNimProvider
+ from .openrouter import OpenRouterProvider
++from .github import GitHubModelsProvider
+ 
+ class LLMProviderFactory:
+     """Factory for instantiating LLM providers."""
+@@ -16,5 +17,7 @@ class LLMProviderFactory:
+             return NvidiaNimProvider(model=model)
+         elif name == "openrouter":
+             return OpenRouterProvider(model=model)
++        elif name == "github":
++            return GitHubModelsProvider(model=model)
+         else:
+             raise ValueError(f"Unsupported provider: {provider_name}")
+diff --git a/src/liteagent/providers/github.py b/src/liteagent/providers/github.py
+new file mode 100644
+index 0000000..0385833
+--- /dev/null
++++ b/src/liteagent/providers/github.py
+@@ -0,0 +1,84 @@
++import httpx
++from typing import List, Dict, Any, Optional
++from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
++from .base import BaseProvider
++from ..core.config import settings
++from ..core.logger import log_event, log_error
++from ..cli.formatter import console
++
++def should_retry(exception):
++    """Return True if we should retry based on the exception."""
++    msg = str(exception)
++    return any(code in msg for code in ["429", "500", "502", "503", "504"]) or \
++           any(err in msg for err in ["ReadTimeout", "ConnectError", "Network Error"])
++
++class GitHubModelsProvider(BaseProvider):
++    def __init__(self, model: str = None, api_key: str = None):
++        self.model = model or "openai/o4-mini"
++        self.api_key = api_key or settings.github_token
++        self.base_url = "https://models.github.ai/inference"
++
++    @retry(
++        stop=stop_after_attempt(5),
++        wait=wait_exponential(multiplier=2, min=4, max=60),
++        retry=retry_if_exception(should_retry),
++        reraise=True
++    )
++    async def generate(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
++        if not self.api_key:
++            raise ValueError("GitHub token is required. Set GITHUB_TOKEN in your .env file.")
++            
++        headers = {
++            "Authorization": f"Bearer {self.api_key}",
++            "Content-Type": "application/json",
++            "Accept": "application/json",
++        }
++        
++        try:
++            async with httpx.AsyncClient(timeout=300.0, verify=settings.verify_ssl) as client:
++                payload = {
++                    "model": self.model,
++                    "messages": messages,
++                }
++                if tools:
++                    payload["tools"] = tools
++                log_event(
++                    "provider_request",
++                    "provider.github",
++                    {"url": f"{self.base_url}/chat/completions", "payload": payload},
++                )
++                
++                response = await client.post(f"{self.base_url}/chat/completions", json=payload, headers=headers)
++                
++                if response.status_code == 429:
++                    console.print("[yellow]Warning: Rate limit reached (GitHub Models 429). Retrying...[/yellow]")
++                    log_event(
++                        "provider_retry",
++                        "provider.github",
++                        {"status_code": response.status_code, "response_text": response.text},
++                        level="warn",
++                    )
++                    raise Exception(f"Rate Limit Error (429): {response.text}")
++                    
++                if response.status_code != 200:
++                    error_msg = f"GitHub Models API Error ({response.status_code}): {response.text}"
++                    log_error(
++                        "provider.github",
++                        error_msg,
++                        {"status_code": response.status_code, "response_text": response.text, "payload": payload},
++                    )
++                    raise Exception(error_msg)
++                    
++                data = response.json()
++                log_event("provider_response", "provider.github", {"status_code": response.status_code, "response_json": data})
++                return data["choices"][0]["message"]
++        except (httpx.ReadTimeout, httpx.ConnectError) as e:
++            console.print(f"[yellow]Warning: Network error ({str(e)}). Retrying...[/yellow]")
++            log_error("provider.github", e, {"stage": "network_exception"})
++            raise Exception(f"Network Error: {str(e)}")
++
++    def get_tool_schema(self, tool_definition: Dict[str, Any]) -> Dict[str, Any]:
++        return {
++            "type": "function",
++            "function": tool_definition
++        }
+diff --git a/src/liteagent/providers/nvidia_nim.py b/src/liteagent/providers/nvidia_nim.py
+index 533c75e..f3dc6a0 100644
+--- a/src/liteagent/providers/nvidia_nim.py
++++ b/src/liteagent/providers/nvidia_nim.py
+@@ -37,7 +37,7 @@ class NvidiaNimProvider(BaseProvider):
+         }
+         
+         try:
+-            async with httpx.AsyncClient(timeout=300.0) as client:
++            async with httpx.AsyncClient(timeout=300.0, verify=settings.verify_ssl) as client:
+                 payload = {
+                     "model": self.model,
+                     "messages": messages,
+diff --git a/src/liteagent/providers/openrouter.py b/src/liteagent/providers/openrouter.py
+index f6be583..f1f2ba1 100644
+--- a/src/liteagent/providers/openrouter.py
++++ b/src/liteagent/providers/openrouter.py
+@@ -37,7 +37,7 @@ class OpenRouterProvider(BaseProvider):
+         }
+         
+         try:
+-            async with httpx.AsyncClient(timeout=300.0) as client:
++            async with httpx.AsyncClient(timeout=300.0, verify=settings.verify_ssl) as client:
+                 payload = {
+                     "model": self.model,
+                     "messages": messages,
+diff --git a/src/liteagent/tools/delete_path_tool.py b/src/liteagent/tools/delete_path_tool.py
+index bd728d6..2075ae7 100644
+--- a/src/liteagent/tools/delete_path_tool.py
++++ b/src/liteagent/tools/delete_path_tool.py
+@@ -4,7 +4,12 @@ from .providers import ToolProviderFactory
+ 
+ def create_delete_path_tool(providers: ToolProviderFactory):
+     def delete_path(path_to_delete: str) -> str:
+-        """Deletes a file or directory. Directories are removed recursively."""
++        """
++        Deletes a file or directory. Directories are removed recursively.
++        
++        Args:
++            path_to_delete: The path to the file or directory to delete.
++        """
+         path = Path(path_to_delete)
+ 
+         if not path.exists():
+diff --git a/src/liteagent/tools/factory.py b/src/liteagent/tools/factory.py
+index 4b02ba9..ea3e455 100644
+--- a/src/liteagent/tools/factory.py
++++ b/src/liteagent/tools/factory.py
+@@ -27,11 +27,11 @@ class ToolFactory:
+             create_rename_path_tool(providers),
+             create_delete_path_tool(providers),
+             create_modify_file_tool(providers),
+-            create_run_shell_command_tool(providers),
++        #    create_run_shell_command_tool(providers),
+         ]
+         if include_insight:
+             tools.extend([
+-                create_search_code_tool(providers),
++            #   create_search_code_tool(providers),
+                 create_search_logs_tool(providers),
+             ])
+         return tools
+diff --git a/src/liteagent/tools/get_workspace_info_tool.py b/src/liteagent/tools/get_workspace_info_tool.py
+index dbea568..87fa477 100644
+--- a/src/liteagent/tools/get_workspace_info_tool.py
++++ b/src/liteagent/tools/get_workspace_info_tool.py
+@@ -1,37 +1,141 @@
+-import os
+ from pathlib import Path
+-from typing import List, Optional
++from typing import Optional
++import pathspec
+ from .providers import ToolProviderFactory
+ 
++# Directories/names that are ALWAYS ignored, regardless of .gitignore or fallback
++ALWAYS_IGNORE_NAMES = {".git", ".liteagent"}
++
++# Fallback ignore patterns when no .gitignore exists (C# / .NET project focused)
++FALLBACK_IGNORE_PATTERNS = [
++    # Python
++    "__pycache__",
++    "*.pyc",
++    ".venv",
++    "*.egg-info",
++    # Node
++    "node_modules",
++    # OS files
++    ".DS_Store",
++    "Thumbs.db",
++    # IDE / Editor
++    ".idea",
++    ".vscode",
++    "*.user",
++    "*.suo",
++    # C# / .NET build output
++    "bin/",
++    "obj/",
++    ".vs/",
++    "packages/",
++    "TestResults/",
++    # C# / .NET compiled & generated files
++    "*.dll",
++    "*.exe",
++    "*.pdb",
++    "*.cache",
++    "*.log",
++    # NuGet
++    "*.nupkg",
++    "nuget.exe",
++    # Test & coverage
++    ".pytest_cache",
++    ".coverage",
++    "htmlcov/",
++    "coverage.xml",
++    # Misc
++    "*.min.js",
++    "*.min.css",
++    "*.map",
++]
++
++
++def _load_gitignore_spec(base_path: Path) -> Optional[pathspec.PathSpec]:
++    """Load and parse .gitignore from the given base_path. Returns None if not found."""
++    gitignore_path = base_path / ".gitignore"
++    if gitignore_path.is_file():
++        try:
++            lines = gitignore_path.read_text(encoding="utf-8").splitlines()
++            return pathspec.PathSpec.from_lines("gitwildmatch", lines)
++        except Exception:
++            return None
++    return None
++
++
++def _build_fallback_spec() -> pathspec.PathSpec:
++    """Build a PathSpec from the fallback ignore patterns."""
++    return pathspec.PathSpec.from_lines("gitwildmatch", FALLBACK_IGNORE_PATTERNS)
++
++
+ def create_get_workspace_info_tool(providers: ToolProviderFactory):
+-    def get_workspace_info(dir_path: str = ".", ignore_patterns: Optional[List[str]] = None, max_depth: int = 3) -> str:
+-        """ Lists the directory structure, respecting common ignore patterns and bounding depth. """
++    def get_workspace_info(dir_path: str = ".", max_depth: int = 3) -> str:
++        """
++        Lists the directory structure, respecting .gitignore or fallback ignore patterns, bounding depth.
++        
++        Args:
++            dir_path: The directory to inspect. Must be within the project directory. If outside or invalid, defaults to project directory. Defaults to current directory.
++            max_depth: Maximum depth of directory tree to display. Defaults to 3.
++        """
++        max_depth = int(max_depth) if max_depth not in (None, "") else 3
+         output = []
+         base_path = Path(dir_path).resolve()
+-        
+-        default_ignore = {".git", "__pycache__", ".venv", "node_modules", ".DS_Store", ".pytest_cache"}
+-        if ignore_patterns:
+-            default_ignore.update(ignore_patterns)
++        project_dir = providers.project_dir.resolve()
++
++        # Validate dir_path: must exist and be within project directory
++        dir_was_redirected = False
++        if not base_path.exists() or not str(base_path).startswith(str(project_dir)):
++            base_path = project_dir
++            dir_was_redirected = True
++
++        # Load ignore spec: try .gitignore first, then fallback
++        spec = _load_gitignore_spec(base_path)
++        using_gitignore = spec is not None
++        if spec is None:
++            spec = _build_fallback_spec()
++
++        def _should_ignore(p: Path) -> bool:
++            """Check if a path should be ignored based on the loaded spec."""
++            try:
++                rel_path = p.relative_to(base_path)
++            except ValueError:
++                return False
++            rel_str = rel_path.as_posix()
++            # For directories, also check with trailing slash
++            if p.is_dir():
++                if spec.match_file(rel_str + "/") or spec.match_file(rel_str):
++                    return True
++            else:
++                if spec.match_file(rel_str):
++                    return True
++            # Also check if any parent directory is ignored
++            for parent in rel_path.parents:
++                parent_str = parent.as_posix()
++                if parent_str and (spec.match_file(parent_str + "/") or spec.match_file(parent_str)):
++                    return True
++            return False
+ 
+         def _list_dir(current_path: Path, indent: str = ""):
+             try:
+                 items = sorted(current_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+                 for i, item in enumerate(items):
+-                    if item.name in default_ignore:
++                    if item.name in ALWAYS_IGNORE_NAMES or _should_ignore(item):
+                         continue
+-                    
++
+                     is_last = i == len(items) - 1
+                     connector = "└── " if is_last else "├── "
+                     output.append(f"{indent}{connector}{item.name}{'/' if item.is_dir() else ''}")
+-                    
++
+                     if item.is_dir():
+                         new_indent = indent + ("    " if is_last else "│   ")
+-                        if len(new_indent) // 4 < max_depth: 
++                        if len(new_indent) // 4 < max_depth:
+                             _list_dir(item, new_indent)
+             except PermissionError:
+                 output.append(f"{indent} [Permission Denied]")
+ 
+-        output.append(f"Workspace: {base_path}")
++        ignore_source = ".gitignore" if using_gitignore else "fallback ignore list"
++        output.append(f"Workspace: {base_path} (using {ignore_source})")
++        if dir_was_redirected:
++            output.append(f"⚠ Directory redirected from '{dir_path}' to project directory '{base_path}'")
+         _list_dir(base_path)
+         return "\n".join(output)
+     return get_workspace_info
+diff --git a/src/liteagent/tools/list_files_tool.py b/src/liteagent/tools/list_files_tool.py
+index 153fe67..1dbc2c1 100644
+--- a/src/liteagent/tools/list_files_tool.py
++++ b/src/liteagent/tools/list_files_tool.py
+@@ -1,23 +1,128 @@
+ from pathlib import Path
++from typing import Optional
++import pathspec
+ from .providers import ToolProviderFactory
+ 
++# Directories/names that are ALWAYS ignored, regardless of .gitignore or fallback
++ALWAYS_IGNORE_NAMES = {".git", ".liteagent"}
++
++# Fallback ignore patterns when no .gitignore exists (C# / .NET project focused)
++FALLBACK_IGNORE_PATTERNS = [
++    # Python
++    "__pycache__",
++    "*.pyc",
++    ".venv",
++    "*.egg-info",
++    # Node
++    "node_modules",
++    # OS files
++    ".DS_Store",
++    "Thumbs.db",
++    # IDE / Editor
++    ".idea",
++    ".vscode",
++    "*.user",
++    "*.suo",
++    # C# / .NET build output
++    "bin/",
++    "obj/",
++    ".vs/",
++    "packages/",
++    "TestResults/",
++    # C# / .NET compiled & generated files
++    "*.dll",
++    "*.exe",
++    "*.pdb",
++    "*.cache",
++    "*.log",
++    # NuGet
++    "*.nupkg",
++    "nuget.exe",
++    # Test & coverage
++    ".pytest_cache",
++    ".coverage",
++    "htmlcov/",
++    "coverage.xml",
++    # Misc
++    "*.min.js",
++    "*.min.css",
++    "*.map",
++]
++
++
++def _load_gitignore_spec(base_path: Path) -> Optional[pathspec.PathSpec]:
++    """Load and parse .gitignore from the given base_path. Returns None if not found."""
++    gitignore_path = base_path / ".gitignore"
++    if gitignore_path.is_file():
++        try:
++            lines = gitignore_path.read_text(encoding="utf-8").splitlines()
++            return pathspec.PathSpec.from_lines("gitwildmatch", lines)
++        except Exception:
++            return None
++    return None
++
++
++def _build_fallback_spec() -> pathspec.PathSpec:
++    """Build a PathSpec from the fallback ignore patterns."""
++    return pathspec.PathSpec.from_lines("gitwildmatch", FALLBACK_IGNORE_PATTERNS)
++
++
+ def create_list_files_tool(providers: ToolProviderFactory):
+     def list_files(pattern: str = "*", dir_path: str = ".") -> str:
+-        """ Lists files matching a glob pattern (e.g., '**/*.py'). """
++        """
++        Lists files matching a glob pattern. Uses .gitignore if available, otherwise uses a fallback ignore list.
++        
++        Args:
++            pattern: Single glob pattern to filter files (e.g., '*.cs', '*.py', '*'). Only one pattern supported. Defaults to '*'.
++            dir_path: The directory to list files from. Must be within the project directory. If outside or invalid, defaults to project directory. Defaults to current directory.
++        """
+         base_path = Path(dir_path).resolve()
+-        if not base_path.exists():
+-            return f"Error: Directory {dir_path} does not exist."
+-            
++        project_dir = providers.project_dir.resolve()
++
++        # Validate dir_path: must exist and be within project directory
++        dir_was_redirected = False
++        if not base_path.exists() or not str(base_path).startswith(str(project_dir)):
++            base_path = project_dir
++            dir_was_redirected = True
++
++        # Load ignore spec: try .gitignore first, then fallback
++        spec = _load_gitignore_spec(base_path)
++        using_gitignore = spec is not None
++        if spec is None:
++            spec = _build_fallback_spec()
++
++        def _should_ignore(p: Path) -> bool:
++            """Check if a path should be ignored based on the loaded spec."""
++            if p.name in ALWAYS_IGNORE_NAMES:
++                return True
++            try:
++                rel_path = p.relative_to(base_path)
++            except ValueError:
++                return False
++            rel_str = rel_path.as_posix()
++            if spec.match_file(rel_str):
++                return True
++            # Also check if any parent directory is ignored
++            for parent in rel_path.parents:
++                parent_str = parent.as_posix()
++                if parent_str and (spec.match_file(parent_str + "/") or spec.match_file(parent_str)):
++                    return True
++            return False
++
+         output = []
+         try:
+             for p in base_path.rglob(pattern):
+-                if p.is_file():
++                if p.is_file() and not _should_ignore(p):
+                     output.append(str(p.relative_to(base_path) if p.is_relative_to(base_path) else p))
+         except Exception as e:
+             return f"Error listing files: {str(e)}"
+-            
++
+         if not output:
+             return f"No files found matching '{pattern}' in {dir_path}"
+-            
+-        return "\n".join(output)
++
++        ignore_source = ".gitignore" if using_gitignore else "fallback ignore list"
++        result = f"Found {len(output)} files (using {ignore_source}):\n"
++        if dir_was_redirected:
++            result += f"⚠ Directory redirected from '{dir_path}' to project directory '{base_path}'\n"
++        return result + "\n".join(output)
+     return list_files
+diff --git a/src/liteagent/tools/modify_file_tool.py b/src/liteagent/tools/modify_file_tool.py
+index 84b6b7c..8ba1659 100644
+--- a/src/liteagent/tools/modify_file_tool.py
++++ b/src/liteagent/tools/modify_file_tool.py
+@@ -11,6 +11,10 @@ def create_modify_file_tool(providers: ToolProviderFactory):
+         old code
+         +++ REPLACE
+         new code
++        
++        Args:
++            file_path: The path to the file to modify.
++            edits: The SEARCH/REPLACE blocks to apply. Multiple blocks can be chained.
+         """
+         path = Path(file_path)
+         if not path.exists():
+diff --git a/src/liteagent/tools/read_file_tool.py b/src/liteagent/tools/read_file_tool.py
+index 4febd54..6b85848 100644
+--- a/src/liteagent/tools/read_file_tool.py
++++ b/src/liteagent/tools/read_file_tool.py
+@@ -1,44 +1,46 @@
+ from pathlib import Path
+-from typing import List, Optional
++from typing import Optional
+ from .providers import ToolProviderFactory
+ 
+ DEFAULT_READ_LINES = 100
+ 
+ def create_read_file_tool(providers: ToolProviderFactory):
+-    def read_file(file_paths: List[str], start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
+-        """Reads one or more files, optionally within a specific line range, prepending line numbers. Do NOT use this tool to read log files; use read_log_lineRange instead. If no line range is specified, reads the first 100 lines by default."""
++    def read_file(file_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
++        """
++        Reads a file, optionally within a specific line range, prepending line numbers. Do NOT use this tool to read log files; use read_log_lineRange instead. If no line range is specified, reads the first 100 lines by default.
++        
++        Args:
++            file_path: The path to the file to read.
++            start_line: The 1-based line number to start reading from. Defaults to 1.
++            end_line: The 1-based line number to stop reading at (inclusive). Defaults to start_line + 99.
++        """
+         start_line = int(start_line) if start_line not in (None, "") else None
+         end_line = int(end_line) if end_line not in (None, "") else None
+-        all_output = []
+-        for file_path in file_paths:
+-            path = Path(file_path)
+-            if not path.exists():
+-                all_output.append(f"Error: File {file_path} does not exist.")
+-                continue
++        path = Path(file_path)
++        if not path.exists():
++            return f"Error: File {file_path} does not exist."
++        
++        try:
++            raw_content = path.read_text(encoding="utf-8")
++            lines = raw_content.splitlines()
+             
+-            try:
+-                raw_content = path.read_text(encoding="utf-8")
+-                lines = raw_content.splitlines()
+-                
+-                # Default: if no range specified, read first 100 lines
+-                if start_line is None and end_line is None:
+-                    start = 0
+-                    end = min(DEFAULT_READ_LINES, len(lines))
+-                else:
+-                    start = (start_line - 1) if start_line else 0
+-                    end = end_line if end_line else len(lines)
+-                
+-                selected_lines = lines[start:end]
+-                
+-                numbered_lines = [f"{i + 1 + start}: {line}" for i, line in enumerate(selected_lines)]
+-                content = "\n".join(numbered_lines)
++            # Default: if no range specified, read first 100 lines
++            if start_line is None and end_line is None:
++                start = 0
++                end = min(DEFAULT_READ_LINES, len(lines))
++            else:
++                start = (start_line - 1) if start_line else 0
++                end = end_line if end_line else len(lines)
++            
++            selected_lines = lines[start:end]
++            
++            numbered_lines = [f"{i + 1 + start}: {line}" for i, line in enumerate(selected_lines)]
++            content = "\n".join(numbered_lines)
+ 
+-                is_full_read = start == 0 and end >= len(lines)
+-                providers.container.read_tracker.record_read(str(path), raw_content, is_full_read=is_full_read)
+-                
+-                all_output.append(f"--- {file_path} (Lines {start+1}-{end}) ---\n{content}\n--- End of selection ---")
+-            except Exception as e:
+-                all_output.append(f"Error reading {file_path}: {str(e)}")
+-                
+-        return "\n\n".join(all_output)
++            is_full_read = start == 0 and end >= len(lines)
++            providers.container.read_tracker.record_read(str(path), raw_content, is_full_read=is_full_read)
++            
++            return f"--- {file_path} (Lines {start+1}-{end}) ---\n{content}\n--- End of selection ---"
++        except Exception as e:
++            return f"Error reading {file_path}: {str(e)}"
+     return read_file
+diff --git a/src/liteagent/tools/read_log_lineRange_tool.py b/src/liteagent/tools/read_log_lineRange_tool.py
+index 1bd0c2b..9e19ede 100644
+--- a/src/liteagent/tools/read_log_lineRange_tool.py
++++ b/src/liteagent/tools/read_log_lineRange_tool.py
+@@ -7,11 +7,13 @@ DEFAULT_RANGE = 3
+ 
+ def create_read_log_lineRange_tool(providers: ToolProviderFactory):
+     def read_log_lineRange(path: str, startLine: int, range: int = DEFAULT_RANGE) -> str:
+-        """Reads a range of lines from a log file. Use this tool instead of read_file for log files.
++        """
++        Reads a range of lines from a log file. Use this tool instead of read_file for log files.
+         
+-        path: The path to the log file to read.
+-        startLine: The 1-based line number to start reading from.
+-        range: Number of lines to read starting from startLine. Default is 3, maximum is 5.
++        Args:
++            path: The path to the log file to read.
++            startLine: The 1-based line number to start reading from.
++            range: Number of lines to read starting from startLine. Default is 3, maximum is 5.
+         """
+         warnings = []
+         try:
+diff --git a/src/liteagent/tools/registry.py b/src/liteagent/tools/registry.py
+index 92b381b..d1df78c 100644
+--- a/src/liteagent/tools/registry.py
++++ b/src/liteagent/tools/registry.py
+@@ -3,14 +3,12 @@ import inspect
+ 
+ SAMPLE_INPUTS = {
+     "get_workspace_info": {
+-        "dir_path": ".",
+-        "ignore_patterns": "['.git', '__pycache__']"
++        "dir_path": "."
+     },
+     "search_in_files": {
+         "pattern": "def.*",
+         "dir_path": ".",
+         "file_pattern": "**/*.py",
+-        "ignore_patterns": "['.venv', 'node_modules']",
+         "literal": "false"
+     },
+     "list_files": {
+@@ -18,7 +16,7 @@ SAMPLE_INPUTS = {
+         "dir_path": "."
+     },
+     "read_file": {
+-        "file_paths": "['src/main.py', 'README.md']",
++        "file_path": "src/main.py",
+         "start_line": "1",
+         "end_line": "50"
+     },
+diff --git a/src/liteagent/tools/rename_path_tool.py b/src/liteagent/tools/rename_path_tool.py
+index acb16ef..d59acab 100644
+--- a/src/liteagent/tools/rename_path_tool.py
++++ b/src/liteagent/tools/rename_path_tool.py
+@@ -3,7 +3,13 @@ from .providers import ToolProviderFactory
+ 
+ def create_rename_path_tool(providers: ToolProviderFactory):
+     def rename_path(old_path: str, new_path: str) -> str:
+-        """Renames a file or directory to a new path."""
++        """
++        Renames a file or directory to a new path. Creates parent directories if needed.
++        
++        Args:
++            old_path: The current path of the file or directory.
++            new_path: The new path to rename to.
++        """
+         source = Path(old_path)
+         target = Path(new_path)
+ 
+diff --git a/src/liteagent/tools/run_shell_command_tool.py b/src/liteagent/tools/run_shell_command_tool.py
+index 14f46c2..72a9919 100644
+--- a/src/liteagent/tools/run_shell_command_tool.py
++++ b/src/liteagent/tools/run_shell_command_tool.py
+@@ -3,7 +3,13 @@ from .providers import ToolProviderFactory
+ 
+ def create_run_shell_command_tool(providers: ToolProviderFactory):
+     def run_shell_command(command: str, timeout: int = 60) -> str:
+-        """Executes a shell command and returns the stdout and stderr."""
++        """
++        Executes a shell command and returns the stdout and stderr.
++        
++        Args:
++            command: The shell command to execute.
++            timeout: Maximum execution time in seconds. Defaults to 60.
++        """
+         try:
+             result = subprocess.run(
+                 command,
+diff --git a/src/liteagent/tools/search_in_files_tool.py b/src/liteagent/tools/search_in_files_tool.py
+index b19d83d..a626325 100644
+--- a/src/liteagent/tools/search_in_files_tool.py
++++ b/src/liteagent/tools/search_in_files_tool.py
+@@ -1,30 +1,98 @@
+ import re
+ from pathlib import Path
+ from typing import List, Optional
++import pathspec
+ from .providers import ToolProviderFactory
+ 
++# Directories/names that are ALWAYS ignored, regardless of .gitignore or fallback
++ALWAYS_IGNORE_NAMES = {".git", ".liteagent"}
++
++# Fallback ignore patterns when no .gitignore exists (C# project focused)
++FALLBACK_IGNORE_PATTERNS = [
++    # Python
++    "__pycache__",
++    "*.pyc",
++    ".venv",
++    "*.egg-info",
++    # Node
++    "node_modules",
++    # OS files
++    ".DS_Store",
++    "Thumbs.db",
++    # IDE / Editor
++    ".idea",
++    ".vscode",
++    "*.user",
++    "*.suo",
++    # C# / .NET build output
++    "bin/",
++    "obj/",
++    ".vs/",
++    "packages/",
++    "TestResults/",
++    # C# / .NET compiled & generated files
++    "*.dll",
++    "*.exe",
++    "*.pdb",
++    "*.cache",
++    "*.log",
++    # NuGet
++    "*.nupkg",
++    "nuget.exe",
++    # Test & coverage
++    ".pytest_cache",
++    ".coverage",
++    "htmlcov/",
++    "coverage.xml",
++    # Misc
++    "*.min.js",
++    "*.min.css",
++    "*.map",
++]
++
++
++def _load_gitignore_spec(base_path: Path) -> Optional[pathspec.PathSpec]:
++    """Load and parse .gitignore from the given base_path. Returns None if not found."""
++    gitignore_path = base_path / ".gitignore"
++    if gitignore_path.is_file():
++        try:
++            lines = gitignore_path.read_text(encoding="utf-8").splitlines()
++            return pathspec.PathSpec.from_lines("gitwildmatch", lines)
++        except Exception:
++            return None
++    return None
++
++
++def _build_fallback_spec() -> pathspec.PathSpec:
++    """Build a PathSpec from the fallback ignore patterns."""
++    return pathspec.PathSpec.from_lines("gitwildmatch", FALLBACK_IGNORE_PATTERNS)
++
++
+ def create_search_in_files_tool(providers: ToolProviderFactory):
+-    def _find_project_root(start_path: Path) -> Path:
+-        current = start_path.resolve()
+-        if current.is_file():
+-            current = current.parent
+-        for candidate in [current] + list(current.parents):
+-            if (candidate / ".git").exists():
+-                return candidate
+-        return Path.cwd().resolve()
+-
+-    def search_in_files(pattern: str, dir_path: str = ".", file_pattern: str = "*", ignore_patterns: Optional[List[str]] = None, literal: bool = False) -> str:
+-        """ Searches for a string or regex pattern in files. """
+-        import fnmatch
+-        output = []
+-        base_path = Path(dir_path).resolve()
++    def search_in_files(pattern: str, dir_path: str = ".", file_pattern: str = "*", literal: bool = False) -> str:
++        """
++        Searches for a string or regex pattern in files. Uses .gitignore if available, otherwise uses a fallback ignore list.
+         
+-        if not base_path.exists():
+-            return f"Error: Directory {dir_path} does not exist."
++        Args:
++            pattern: The search term or regex pattern to look for.
++            dir_path: The directory to search in. Must be within the project directory. If outside or invalid, defaults to project directory. Defaults to current directory.
++            file_pattern: Single glob pattern to filter files (e.g., '*.cs', '*.py', '*'). Only one pattern supported. Defaults to '*'.
++            literal: If true, searches for the exact string. If false, treats pattern as regex. Defaults to false.
++        """
++        base_path = Path(dir_path).resolve()
++        project_dir = providers.project_dir.resolve()
++
++        # Validate dir_path: must exist and be within project directory
++        dir_was_redirected = False
++        if not base_path.exists() or not str(base_path).startswith(str(project_dir)):
++            base_path = project_dir
++            dir_was_redirected = True
+ 
+-        default_ignore = {".git", "__pycache__", ".venv", "node_modules", ".DS_Store", ".pytest_cache"}
+-        if ignore_patterns:
+-            default_ignore.update(ignore_patterns)
++        # Load ignore spec: try .gitignore first, then fallback
++        spec = _load_gitignore_spec(base_path)
++        using_gitignore = spec is not None
++        if spec is None:
++            spec = _build_fallback_spec()
+ 
+         if not literal:
+             try:
+@@ -33,14 +101,30 @@ def create_search_in_files_tool(providers: ToolProviderFactory):
+                 return f"Error compiling regex: {e}"
+ 
+         def _should_ignore(p: Path) -> bool:
+-            rel_path = p.relative_to(base_path) if p.is_relative_to(base_path) else p
+-            for part in rel_path.parts:
+-                if part in default_ignore:
++            """Check if a path should be ignored based on the loaded spec."""
++            # Always ignore certain names regardless of spec
++            if p.name in ALWAYS_IGNORE_NAMES:
++                return True
++            try:
++                rel_path = p.relative_to(base_path)
++            except ValueError:
++                return False
++            rel_str = rel_path.as_posix()
++            # Check both the file path and with trailing slash (for directory patterns)
++            if spec.match_file(rel_str):
++                return True
++            # Also check if any parent directory is ignored
++            for parent in rel_path.parents:
++                parent_str = parent.as_posix()
++                if parent_str and spec.match_file(parent_str + "/"):
++                    return True
++                if parent_str and spec.match_file(parent_str):
+                     return True
+             return False
+ 
+         files_searched = 0
+         matches_found = 0
++        output = []
+ 
+         for p in base_path.rglob(file_pattern):
+             if p.is_file() and not _should_ignore(p):
+@@ -49,7 +133,7 @@ def create_search_in_files_tool(providers: ToolProviderFactory):
+                     content = p.read_text(encoding="utf-8", errors="ignore")
+                     lines = content.splitlines()
+                     file_matches = []
+-                    
++
+                     for i, line in enumerate(lines):
+                         if literal:
+                             if pattern in line:
+@@ -57,7 +141,7 @@ def create_search_in_files_tool(providers: ToolProviderFactory):
+                         else:
+                             if compiled_pattern.search(line):
+                                 file_matches.append((i + 1, line.strip()))
+-                                
++
+                     if file_matches:
+                         matches_found += len(file_matches)
+                         output.append(f"--- {p} ---")
+@@ -69,7 +153,11 @@ def create_search_in_files_tool(providers: ToolProviderFactory):
+ 
+         if not output:
+             return f"No matches found for '{pattern}' in {files_searched} files."
+-            
+-        output.insert(0, f"Found {matches_found} matches in {files_searched} files:\n")
++
++        ignore_source = ".gitignore" if using_gitignore else "fallback ignore list"
++        result = f"Found {matches_found} matches in {files_searched} files (using {ignore_source}):\n"
++        if dir_was_redirected:
++            result += f"\n⚠ Directory redirected from '{dir_path}' to project directory '{base_path}'\n"
++        output.insert(0, result)
+         return "\n".join(output)
+     return search_in_files
+diff --git a/src/liteagent/tools/write_file_tool.py b/src/liteagent/tools/write_file_tool.py
+index 384bb2e..17cd31d 100644
+--- a/src/liteagent/tools/write_file_tool.py
++++ b/src/liteagent/tools/write_file_tool.py
+@@ -3,7 +3,13 @@ from .providers import ToolProviderFactory
+ 
+ def create_write_file_tool(providers: ToolProviderFactory):
+     def write_file(file_path: str, content: str) -> str:
+-        """Writes content to a file, overwriting if it exists."""
++        """
++        Writes content to a file, overwriting if it exists. Creates parent directories if needed.
++        
++        Args:
++            file_path: The path to the file to write.
++            content: The content to write to the file.
++        """
+         path = Path(file_path)
+         try:
+             path.parent.mkdir(parents=True, exist_ok=True)
+-- 
+2.53.0.windows.2
+
