@@ -1,0 +1,26 @@
+From 8f21b67cec93c8a2a72436a92d041c4f6f96cf57 Mon Sep 17 00:00:00 2001
+From: "sm.mahbub" <sm.mahbub@SM-MAHBUB02>
+Date: Thu, 4 Jun 2026 13:13:04 +0600
+Subject: [PATCH] office update 3
+
+---
+ pyproject.toml | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/pyproject.toml b/pyproject.toml
+index a919ae8..24da4ba 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,8 +17,7 @@ dependencies = [
+     "fastapi",
+     "uvicorn",
+     "tree-sitter>=0.24.0",
+-    "tree-sitter-python>=0.24.0",
+-    "tree-sitter-languages>=1.10.0",
++    "tree-sitter-c-sharp>=0.23.5",
+     "rank-bm25>=0.2.2",
+     "pathspec>=0.12.0",
+     "watchdog>=4.0.0",
+-- 
+2.53.0.windows.2
+
