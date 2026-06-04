@@ -37,7 +37,7 @@ class NvidiaNimProvider(BaseProvider):
         }
         
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=300.0, verify=settings.verify_ssl) as client:
                 payload = {
                     "model": self.model,
                     "messages": messages,
