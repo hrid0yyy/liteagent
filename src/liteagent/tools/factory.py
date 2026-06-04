@@ -27,7 +27,7 @@ class ToolFactory:
             create_rename_path_tool(providers),
             create_delete_path_tool(providers),
             create_modify_file_tool(providers),
-            create_run_shell_command_tool(providers),
+        #    create_run_shell_command_tool(providers),
         ]
         if include_insight:
             tools.extend([

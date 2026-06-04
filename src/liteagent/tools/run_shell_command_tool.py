@@ -3,7 +3,13 @@ from .providers import ToolProviderFactory
 
 def create_run_shell_command_tool(providers: ToolProviderFactory):
     def run_shell_command(command: str, timeout: int = 60) -> str:
-        """Executes a shell command and returns the stdout and stderr."""
+        """
+        Executes a shell command and returns the stdout and stderr.
+        
+        Args:
+            command: The shell command to execute.
+            timeout: Maximum execution time in seconds. Defaults to 60.
+        """
         try:
             result = subprocess.run(
                 command,

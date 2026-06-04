@@ -3,7 +3,13 @@ from .providers import ToolProviderFactory
 
 def create_rename_path_tool(providers: ToolProviderFactory):
     def rename_path(old_path: str, new_path: str) -> str:
-        """Renames a file or directory to a new path."""
+        """
+        Renames a file or directory to a new path. Creates parent directories if needed.
+        
+        Args:
+            old_path: The current path of the file or directory.
+            new_path: The new path to rename to.
+        """
         source = Path(old_path)
         target = Path(new_path)
 

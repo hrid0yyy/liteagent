@@ -11,6 +11,10 @@ def create_modify_file_tool(providers: ToolProviderFactory):
         old code
         +++ REPLACE
         new code
+        
+        Args:
+            file_path: The path to the file to modify.
+            edits: The SEARCH/REPLACE blocks to apply. Multiple blocks can be chained.
         """
         path = Path(file_path)
         if not path.exists():

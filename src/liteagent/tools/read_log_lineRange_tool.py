@@ -7,11 +7,13 @@ DEFAULT_RANGE = 3
 
 def create_read_log_lineRange_tool(providers: ToolProviderFactory):
     def read_log_lineRange(path: str, startLine: int, range: int = DEFAULT_RANGE) -> str:
-        """Reads a range of lines from a log file. Use this tool instead of read_file for log files.
+        """
+        Reads a range of lines from a log file. Use this tool instead of read_file for log files.
         
-        path: The path to the log file to read.
-        startLine: The 1-based line number to start reading from.
-        range: Number of lines to read starting from startLine. Default is 3, maximum is 5.
+        Args:
+            path: The path to the log file to read.
+            startLine: The 1-based line number to start reading from.
+            range: Number of lines to read starting from startLine. Default is 3, maximum is 5.
         """
         warnings = []
         try:

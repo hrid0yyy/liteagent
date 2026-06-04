@@ -4,7 +4,12 @@ from .providers import ToolProviderFactory
 
 def create_delete_path_tool(providers: ToolProviderFactory):
     def delete_path(path_to_delete: str) -> str:
-        """Deletes a file or directory. Directories are removed recursively."""
+        """
+        Deletes a file or directory. Directories are removed recursively.
+        
+        Args:
+            path_to_delete: The path to the file or directory to delete.
+        """
         path = Path(path_to_delete)
 
         if not path.exists():

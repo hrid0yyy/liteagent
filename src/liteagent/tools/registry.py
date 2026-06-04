@@ -3,14 +3,12 @@ import inspect
 
 SAMPLE_INPUTS = {
     "get_workspace_info": {
-        "dir_path": ".",
-        "ignore_patterns": "['.git', '__pycache__']"
+        "dir_path": "."
     },
     "search_in_files": {
         "pattern": "def.*",
         "dir_path": ".",
         "file_pattern": "**/*.py",
-        "ignore_patterns": "['.venv', 'node_modules']",
         "literal": "false"
     },
     "list_files": {
@@ -18,7 +16,7 @@ SAMPLE_INPUTS = {
         "dir_path": "."
     },
     "read_file": {
-        "file_paths": "['src/main.py', 'README.md']",
+        "file_path": "src/main.py",
         "start_line": "1",
         "end_line": "50"
     },
