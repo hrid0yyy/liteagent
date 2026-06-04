@@ -1,6 +1,21 @@
+import re
 import sqlite3
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+
+
+def _split_pascal_case(text: str) -> str:
+    """Split PascalCase/camelCase into space-separated words for FTS5 indexing.
+    e.g. 'HistoryEntry' → 'History Entry', 'XMLParser' → 'XML Parser'
+    """
+    if not text:
+        return text
+    # Split at lowercase→uppercase boundary: "historyEntry" → "history Entry"
+    result = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+    # Split at uppercase→uppercase+lowercase: "XMLParser" → "XML Parser"
+    result = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', result)
+    return result
+
 
 class KnowledgeGraph:
     """SQLite-backed code knowledge graph."""
@@ -51,6 +66,47 @@ class KnowledgeGraph:
                     template TEXT NOT NULL
                 )
             """)
+            # FTS5 virtual table for fast tokenized search on symbols.
+            # Standalone (no content= sync) — we manage inserts manually with
+            # PascalCase-split values so "HistoryEntry" becomes "History Entry"
+            # and FTS5 can match queries like "history entry".
+            # 
+            # Always drop and recreate FTS5 on startup — it's just an index,
+            # and this guarantees consistency after schema changes.
+            self.conn.execute("DROP TABLE IF EXISTS symbols_fts")
+            # Drop old triggers from previous schema if they exist
+            self.conn.execute("DROP TRIGGER IF EXISTS symbols_fts_insert")
+            self.conn.execute("DROP TRIGGER IF EXISTS symbols_fts_delete")
+            self.conn.execute("DROP TRIGGER IF EXISTS symbols_fts_update")
+            
+            self.conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
+                    name, source_code, class_name
+                )
+            """)
+            
+            # Rebuild FTS5 index from existing symbols
+            self._rebuild_fts_index()
+
+    def _rebuild_fts_index(self):
+        """Rebuild the FTS5 index from the symbols table with PascalCase-split values.
+        Called on init to handle migration from old schema or empty FTS5.
+        """
+        # Check if FTS5 is already populated
+        cursor = self.conn.execute("SELECT count(*) FROM symbols_fts")
+        fts_count = cursor.fetchone()[0]
+        cursor = self.conn.execute("SELECT count(*) FROM symbols")
+        symbols_count = cursor.fetchone()[0]
+        
+        # Only rebuild if FTS5 is empty but symbols exist (migration or fresh start)
+        if fts_count == 0 and symbols_count > 0:
+            cursor = self.conn.execute("SELECT id, name, source_code, class_name FROM symbols")
+            rows = cursor.fetchall()
+            for row in rows:
+                self.conn.execute(
+                    "INSERT INTO symbols_fts(rowid, name, source_code, class_name) VALUES (?, ?, ?, ?)",
+                    (row[0], _split_pascal_case(row[1]), row[2], _split_pascal_case(row[3] or ""))
+                )
 
     def insert_symbol(self, name: str, qualified_name: str, kind: str, file_path: str, start_line: int, end_line: int, source_code: str, class_name: Optional[str] = None):
         with self.conn:
@@ -66,6 +122,19 @@ class KnowledgeGraph:
                     source_code=excluded.source_code,
                     class_name=excluded.class_name
             """, (name, qualified_name, kind, file_path, start_line, end_line, source_code, class_name))
+            # Get the symbol id (works for both INSERT and UPDATE)
+            cursor = self.conn.execute(
+                "SELECT id FROM symbols WHERE qualified_name=?", (qualified_name,)
+            )
+            row = cursor.fetchone()
+            if row:
+                symbol_id = row[0]
+                # Remove old FTS5 entry if exists, then insert with PascalCase-split values
+                self.conn.execute("DELETE FROM symbols_fts WHERE rowid=?", (symbol_id,))
+                self.conn.execute(
+                    "INSERT INTO symbols_fts(rowid, name, source_code, class_name) VALUES (?, ?, ?, ?)",
+                    (symbol_id, _split_pascal_case(name), source_code, _split_pascal_case(class_name or ""))
+                )
 
     def insert_relationship(self, source: str, target: str, kind: str, file_path: str):
         with self.conn:
@@ -102,6 +171,12 @@ class KnowledgeGraph:
     def clear_file(self, file_path: str):
         """Removes all symbols, relationships, and templates associated with a file."""
         with self.conn:
+            # Get symbol IDs before deleting so we can clean up FTS5
+            cursor = self.conn.execute("SELECT id FROM symbols WHERE file_path = ?", (file_path,))
+            symbol_ids = [row[0] for row in cursor.fetchall()]
+            if symbol_ids:
+                placeholders = ",".join("?" * len(symbol_ids))
+                self.conn.execute(f"DELETE FROM symbols_fts WHERE rowid IN ({placeholders})", symbol_ids)
             self.conn.execute("DELETE FROM symbols WHERE file_path = ?", (file_path,))
             self.conn.execute("DELETE FROM relationships WHERE file_path = ?", (file_path,))
             self.conn.execute("DELETE FROM log_templates WHERE file_path = ?", (file_path,))

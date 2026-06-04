@@ -6,9 +6,8 @@ from .graph_store import KnowledgeGraph
 
 class ASTParser:
     """Tree-sitter based parser for C# files."""
-    def __init__(self, graph_store: KnowledgeGraph, code_collection=None):
+    def __init__(self, graph_store: KnowledgeGraph):
         self.graph_store = graph_store
-        self.code_collection = code_collection
         self.parser = tree_sitter.Parser(tree_sitter.Language(tree_sitter_c_sharp.language()))
         
     def parse_directory(self, root_dir: Path):
@@ -35,78 +34,17 @@ class ASTParser:
             
         # Clean up existing references for this file to prevent stale data
         self.graph_store.clear_file(str(file_path))
-        if self.code_collection:
-            try:
-                self.code_collection.delete(where={"file_path": str(file_path)})
-            except Exception:
-                pass
                 
         # If it's not a C# file, just index the entire file text as a single "File" symbol
         if file_path.suffix != ".cs":
             qname = f"file.{file_path.name}"
             line_count = len(code_str.split('\n'))
             self.graph_store.insert_symbol(file_path.name, qname, "File", str(file_path), 1, line_count, code_str)
-            if self.code_collection:
-                self.code_collection.upsert(
-                    ids=[qname], 
-                    documents=[code_str], 
-                    metadatas=[{
-                        "name": file_path.name, 
-                        "file_path": str(file_path),
-                        "method_name": file_path.name # Use filename as method_name for non-cs files
-                    }]
-                )
             return
             
         tree = self.parser.parse(code_str.encode("utf8"))
         self._extract_symbols_and_relations(tree.root_node, code_str, str(file_path))
         
-    def _split_with_overlap(self, text: str, chunk_size: int = 800, overlap: int = 200):
-        chunks = []
-        start = 0
-        while start < len(text):
-            end = start + chunk_size
-            chunks.append(text[start:end])
-            if end >= len(text):
-                break
-            start += chunk_size - overlap
-        return chunks
-
-    def _index_method_chunks(self, method_name, class_name, signature, source, file_path):
-        if not self.code_collection:
-            return
-        chunks = self._split_with_overlap(source)
-        for i, chunk in enumerate(chunks):
-            # Prepend signature to every chunk so each embedding carries method context
-            enriched = f"{signature}\n{chunk}"
-            chunk_id = f"method.{method_name}::chunk_{i}::{file_path}"
-            self.code_collection.upsert(
-                ids=[chunk_id],
-                documents=[enriched],
-                metadatas=[{
-                    "file_path": file_path,
-                    "class_name": class_name or "",
-                    "method_name": method_name,
-                    "chunk_index": i
-                }]
-            )
-
-    def _index_class_summary(self, class_name, method_signatures, file_path):
-        if not self.code_collection:
-            return
-        summary = f"class {class_name}:\n" + "\n".join(method_signatures)
-        chunk_id = f"class_summary.{class_name}::{file_path}"
-        self.code_collection.upsert(
-            ids=[chunk_id],
-            documents=[summary],
-            metadatas=[{
-                "file_path": file_path,
-                "class_name": class_name,
-                "method_name": "",   # marks it as a class-level entry
-                "chunk_index": -1
-            }]
-        )
-
     def _extract_symbols_and_relations(self, root_node, code_str, file_path):
         lines = code_str.split('\n')
         
@@ -142,15 +80,6 @@ class ASTParser:
                     qname = f"class.{name}"
                     self.graph_store.insert_symbol(name, qname, "Class", file_path, start_line, end_line, source)
                     
-                    # Index class summary
-                    if self.code_collection:
-                        sigs = []
-                        # Look for method children to build a "table of contents"
-                        for child in node.children:
-                            if child.type == "method_declaration":
-                                sigs.append(get_method_signature(child))
-                        self._index_class_summary(name, sigs, file_path)
-                    
                     prev_class = current_class
                     current_class = name
                     for child in node.children:
@@ -166,10 +95,6 @@ class ASTParser:
                     source = "\n".join(lines[start_line-1:end_line])
                     qname = f"method.{name}"
                     self.graph_store.insert_symbol(name, qname, "Function", file_path, start_line, end_line, source, current_class)
-                    
-                    if self.code_collection:
-                        sig = get_method_signature(node)
-                        self._index_method_chunks(name, current_class, sig, source, file_path)
                     
                     prev_method = current_method
                     current_method = name
