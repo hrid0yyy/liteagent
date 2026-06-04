@@ -14,11 +14,13 @@ class Settings(BaseSettings):
     # LLM Providers
     nvidia_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
+    github_token: Optional[str] = None
+    verify_ssl: bool = True
     ollama_base_url: str = "http://localhost:11434"
     
     # Default Provider
-    default_provider: str = "ollama"
-    default_model: str = "llama3" # Default for Ollama
+    default_provider: str = "github"
+    default_model: str = "openai/o4-mini" # Default for GitHub Models
 
     # Session logging
     log_enabled: bool = True

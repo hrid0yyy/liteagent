@@ -3,7 +3,7 @@ from operator import add
 
 class AppState:
     def __init__(self):
-        self.auto_mode = False
+        self.auto_mode = True
         self.read_tracker: Dict[str, Dict[str, Any]] = {}
         self.session_id: str = ""
         self.session_log_path: str = ""
