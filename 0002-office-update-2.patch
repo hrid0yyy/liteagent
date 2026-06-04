@@ -1,0 +1,1120 @@
+From 9f5367cca254583790798359328a2941d4ca6679 Mon Sep 17 00:00:00 2001
+From: "sm.mahbub" <sm.mahbub@SM-MAHBUB02>
+Date: Thu, 4 Jun 2026 11:48:06 +0600
+Subject: [PATCH 2/2] office update 2
+
+---
+ SEARCH_TOOLS_HOW_IT_WORKS.md                 | 317 ++++++++++++++++++
+ pyproject.toml                               |   4 +-
+ src/liteagent/insight/indexer/ast_parser.py  |  77 +----
+ src/liteagent/insight/indexer/graph_store.py |  75 +++++
+ src/liteagent/insight/providers.py           |  70 +---
+ src/liteagent/insight/retrieval/retriever.py | 332 ++++++++++++++-----
+ src/liteagent/tools/factory.py               |   2 +-
+ src/liteagent/tools/search_code_tool.py      |  26 +-
+ 8 files changed, 665 insertions(+), 238 deletions(-)
+ create mode 100644 SEARCH_TOOLS_HOW_IT_WORKS.md
+
+diff --git a/SEARCH_TOOLS_HOW_IT_WORKS.md b/SEARCH_TOOLS_HOW_IT_WORKS.md
+new file mode 100644
+index 0000000..68d7042
+--- /dev/null
++++ b/SEARCH_TOOLS_HOW_IT_WORKS.md
+@@ -0,0 +1,317 @@
++# Search Tools — How They Work
++
++This document describes how the `search_code` and `search_logs` tools work end-to-end based on the **current implementation**.
++
++> **Status as of June 2026:** Both `search_code` and `search_logs` are **active**.
++
++---
++
++## 1. Search Code Tool
++
++### Current Status: ✅ ACTIVE
++
++### Architecture Overview
++
++```
++User Query
++    │
++    ▼
++search_code_tool.py          ← LLM-facing tool interface (top_k: default=2, max=5)
++    │
++    ▼
++HybridRetriever             ← Orchestrates 3-stage retrieval strategy
++    │
++    ├──► Stage 1: SQLite FTS5 MATCH       (fast tokenized search)
++    │
++    ├──► Stage 2: BM25Okapi scoring      (proper TF-IDF ranking)
++    │
++    └──► Stage 3: RapidFuzz fuzzy match  (typos, partial names, rephrasing)
++    │
++    ▼
++Truncation: If source_code > 50 lines → truncate + add read_file hint
++```
++
++### Step-by-Step Flow
++
++#### 1. LLM calls `search_code(query, top_k=2)`
++
++The tool is defined in `src/liteagent/tools/search_code_tool.py`. Parameters:
++
++| Parameter | Default | Max | Description |
++|---|---|---|---|
++| `query` | required | — | The search query, concept, or logic to look for |
++| `top_k` | `2` | `5` | Maximum number of results to return |
++
++The tool clamps `top_k` to 1–5 and delegates to `providers.insight.retriever.search(query, top_k)`.
++
++#### 2. HybridRetriever.search() — Stage 1: FTS5 Tokenized Search
++
++```python
++# retriever.py
++fts_query = " ".join(tokenize(query))  # e.g., "ValidateToken logic"
++cursor.execute("""
++    SELECT s.file_path, s.name, s.class_name, s.source_code, s.start_line, s.end_line
++    FROM symbols s
++    JOIN symbols_fts fts ON s.id = fts.rowid
++    WHERE symbols_fts MATCH ?
++    ORDER BY rank
++    LIMIT ?
++""", (fts_query, top_k))
++```
++
++- The query is tokenized into lowercase alphanumeric tokens.
++- FTS5 performs fast tokenized search with built-in ranking (`ORDER BY rank`).
++- FTS5 is kept in sync with the `symbols` table via SQLite triggers (insert/update/delete).
++- If results are found, Stages 2 and 3 are skipped.
++
++#### 3. HybridRetriever.search() — Stage 2: BM25 Scoring
++
++```python
++from rank_bm25 import BM25Okapi
++
++# Build index lazily from all symbols in SQLite
++corpus = [tokenize(f"{name} {class_name} {source_code}") for each symbol]
++bm25 = BM25Okapi(corpus)
++
++# Score the query
++scores = bm25.get_scores(tokenize(query))
++# Return top_k by score
++```
++
++- BM25 provides proper TF-IDF ranking — a query like `"token validation"` ranks `ValidateToken` higher than `GenerateToken`.
++- The index is built lazily on first search and cached. It rebuilds when `mark_stale()` is called (triggered by watchdog file changes).
++- Corpus document = `"{name} {class_name} {source_code}"`, tokenized by splitting on non-alphanumeric chars.
++- If results are found, Stage 3 is skipped.
++
++#### 4. HybridRetriever.search() — Stage 3: RapidFuzz Fuzzy Match
++
++```python
++from rapidfuzz import fuzz
++
++name_score = fuzz.partial_ratio(query_lower, name.lower())
++class_score = fuzz.partial_ratio(query_lower, class_name.lower())
++best_score = max(name_score, class_score)
++if best_score >= 65:  # threshold
++    # include in results
++```
++
++- Handles typos, partial names, and rephrasing.
++- Scores against both `name` and `class_name`, takes the best.
++- Uses `partial_ratio` which finds the best matching substring.
++- Results sorted by score descending.
++
++#### 5. Source Code Truncation
++
++After getting results, if a result's source code exceeds `MAX_SOURCE_LINES` (default: 50), it gets truncated:
++
++```python
++MAX_SOURCE_LINES = 50  # Easy to change
++
++# If source_code has more than 50 lines:
++truncated = "\n".join(lines[:50])
++truncated += "\n// ... (Function/class line range 1-187. Use the read_file tool to read the whole thing)"
++```
++
++#### 6. Result Formatting
++
++The tool formats results as:
++
++**Short result (≤ 50 lines):**
++```
++File: D:\project\AuthService.cs
++Class: AuthService
++Code:
++public bool ValidateToken(string token) {
++    // ... full source ...
++}
++---
++```
++
++**Long result (> 50 lines, truncated):**
++```
++File: D:\project\AuthService.cs
++Class: AuthService
++Code:
++public class AuthService {
++    private readonly ITokenProvider _provider;
++    // ... first 50 lines ...
++    // ... (Function/class line range 1-187. Use the read_file tool to read the whole thing)
++}
++---
++```
++
++### Indexing Pipeline (How Code Gets Into SQLite)
++
++The `ASTParser` (`src/liteagent/insight/indexer/ast_parser.py`) handles indexing:
++
++1. **On startup**, `InsightProviders` spawns a background thread to parse the project directory.
++2. **On file change**, `watchdog` triggers re-indexing of the modified file and marks the BM25 index as stale.
++3. For each `.cs` file, tree-sitter parses the AST and extracts:
++   - **Classes** → stored in SQLite `symbols` table
++   - **Methods** → stored in SQLite `symbols` table (with `class_name` reference)
++4. For non-`.cs` files (`.json`, `.config`, etc.), the entire file content is indexed as a single "File" symbol.
++5. FTS5 virtual table stays in sync automatically via SQLite triggers.
++
++### Key Files
++
++| File | Role |
++|---|---|
++| `src/liteagent/tools/search_code_tool.py` | LLM-facing tool interface (top_k: default 2, max 5) |
++| `src/liteagent/insight/retrieval/retriever.py` | `HybridRetriever` — 3-stage pipeline (FTS5 → BM25 → RapidFuzz) + truncation |
++| `src/liteagent/insight/indexer/ast_parser.py` | Tree-sitter parsing → SQLite only |
++| `src/liteagent/insight/indexer/graph_store.py` | SQLite `KnowledgeGraph` — symbols, relationships, FTS5 |
++| `src/liteagent/insight/providers.py` | Wires everything together (no ChromaDB) |
++
++---
++
++## 2. Search Logs Tool
++
++### Current Status: ✅ ACTIVE
++
++### Architecture Overview
++
++```
++User Query
++    │
++    ▼
++search_logs_tool.py          ← LLM-facing tool interface
++    │
++    ▼
++LogIndex.search()            ← 3-stage pipeline on raw files
++    │
++    ├──► Stage 1: Case-insensitive exact match    (fast, zero deps)
++    │
++    ├──► Stage 2: Regex match                     (when is_plain=False)
++    │
++    └──► Stage 3: RapidFuzz partial_ratio          (handles typos, partial names)
++```
++
++### Step-by-Step Flow
++
++#### 1. LLM calls `search_logs(query, is_plain, context_lines, last_hours, limit)`
++
++The tool is defined in `src/liteagent/tools/search_logs_tool.py`. Parameters:
++
++| Parameter | Default | Max | Description |
++|---|---|---|---|
++| `query` | required | — | Search term or pattern |
++| `is_plain` | `True` | — | `True` = keyword, `False` = regex |
++| `context_lines` | `2` | `5` | Surrounding lines to include |
++| `last_hours` | `None` | — | Filter to last N hours (currently unused) |
++| `limit` | `1` | `5` | Max results to return |
++
++The tool enforces constraints (clamping `limit` to 1–5, `context_lines` to 0–5) and delegates to `providers.insight.log_index.search()`.
++
++#### 2. LogIndex.search() — Raw File Scanning
++
++The `search()` method iterates over log file paths configured in `settings.insight_log_paths`. For each file:
++
++1. Opens the file and reads all lines into memory.
++2. Calls `_match_lines()` to find matching line indices.
++3. For each match, extracts context (surrounding lines) and formats the result.
++
++#### 3. _match_lines() — 3-Stage Pipeline
++
++This is the core matching logic. Stages run in order and **short-circuit** — if a stage produces results, later stages are skipped.
++
++**Stage 1 — Case-insensitive exact match:**
++```python
++hits = [(i, False) for i, line in enumerate(lines) if query_lower in line.lower()]
++```
++- Fast, zero dependencies.
++- Handles casing mismatches (e.g., `"functionA"` finds `"FunctionA"`).
++
++**Stage 2 — Regex match (only when `is_plain=False`):**
++```python
++hits = [(i, False) for i, line in enumerate(lines)
++        if re.search(query, line, re.IGNORECASE)]
++```
++- Supports complex patterns like `"Error [0-9]{3}"`.
++- Wrapped in try/except to handle invalid regex gracefully.
++
++**Stage 3 — RapidFuzz fuzzy match:**
++```python
++from rapidfuzz import fuzz
++score = fuzz.partial_ratio(query_lower, line.lower())
++if score >= 70:  # threshold
++    scored.append((score, i))
++```
++- Handles typos, partial names, rephrasing, and extra words.
++- Uses `partial_ratio` which finds the best matching substring within the line.
++- Results are sorted by score (descending) and flagged as `fuzzy=True`.
++
++#### 4. Result Ordering
++
++- **Stage 1 & 2 hits:** Sorted by line number descending (newest first, assuming logs are chronological).
++- **Stage 3 hits:** Sorted by fuzzy score descending (most relevant first).
++
++#### 5. Context Extraction
++
++For each matched line, the tool extracts surrounding lines:
++
++```python
++start_idx = max(0, i - context_lines)
++end_idx = min(total_lines, i + context_lines + 1)
++```
++
++The matched line is prefixed with `>> ` and context lines with `   `:
++```
++   42: [INFO] Service started
++>> 43: [ERROR] Connection reset by peer
++   44: [INFO] Retrying...
++```
++
++#### 6. Result Formatting
++
++The tool formats each result as:
++```
++[2026-05-24T18:00:00Z] ERROR - Line 43 - app.log [fuzzy match]
++Context:
++   42: [INFO] Service started
++>> 43: [ERROR] Connection reset by peer
++   44: [INFO] Retrying...
++---
++```
++
++The `[fuzzy match]` label is appended when the result came from Stage 3, letting the LLM know the match may not be exact.
++
++### FTS5 Indexed Search (Separate Path)
++
++The `LogIndex` also has a `search_indexed()` method that uses SQLite FTS5 for searching ingested log records. Falls back to `LIKE` on FTS5 syntax errors. **This method is not called by the `search_logs` tool** — it exists as a separate API for ingested records.
++
++### Key Files
++
++| File | Role |
++|---|---|
++| `src/liteagent/tools/search_logs_tool.py` | LLM-facing tool interface with constraint enforcement |
++| `src/liteagent/insight/logs/log_index.py` | `LogIndex` — 3-stage matching pipeline + FTS5 indexed search |
++| `src/liteagent/insight/providers.py` | Creates `LogIndex` instance at `insight_dir / "log_index.db"` |
++
++---
++
++## Comparison: Search Code vs Search Logs
++
++| Aspect | Search Code | Search Logs |
++|---|---|---|
++| **Status** | ✅ Active | ✅ Active |
++| **Stage 1** | FTS5 tokenized search | Case-insensitive exact match |
++| **Stage 2** | BM25Okapi (TF-IDF ranking) | Regex match |
++| **Stage 3** | RapidFuzz fuzzy (threshold 65) | RapidFuzz fuzzy (threshold 70) |
++| **Data Source** | SQLite `knowledge.db` (symbols + FTS5) | Raw `.log` files + SQLite `log_index.db` |
++| **Indexing** | Background AST parsing → SQLite | None (reads files on-the-fly) |
++| **Real-time Sync** | Watchdog → re-parse + mark BM25 stale | None (reads current file state) |
++| **Result Format** | File + Class + Code (truncated at 50 lines) | Timestamp + Level + Line + Context Block |
++| **Max Results** | `top_k` (default 2, max 5) | `limit` (default 1, max 5) |
++| **Fuzzy Matching** | Yes (RapidFuzz, threshold 65) | Yes (RapidFuzz, threshold 70) |
++| **BM25 Used** | ✅ Yes (rank-bm25) | No |
++| **ChromaDB Used** | No (removed) | No |
++
++---
++
++## Configurable Constants
++
++| Constant | File | Default | Description |
++|---|---|---|---|
++| `MAX_SOURCE_LINES` | `retriever.py` | `50` | Max lines of source code before truncation |
++| `MAX_TOP_K` | `search_code_tool.py` | `5` | Maximum results for search_code |
++| `DEFAULT_TOP_K` | `search_code_tool.py` | `2` | Default results for search_code |
+diff --git a/pyproject.toml b/pyproject.toml
+index 74ac2b3..a919ae8 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -19,13 +19,11 @@ dependencies = [
+     "tree-sitter>=0.24.0",
+     "tree-sitter-python>=0.24.0",
+     "tree-sitter-languages>=1.10.0",
+-    "chromadb>=1.0.0",
+     "rank-bm25>=0.2.2",
+     "pathspec>=0.12.0",
+     "watchdog>=4.0.0",
+     "google-genai>=1.0.0",
+-    "sentence-transformers>=2.2.2",
+-    "rapidfuzz>=3.0.0",
++    "rapidfuzz>=3.14.5",
+ ]
+ requires-python = ">=3.10"
+ 
+diff --git a/src/liteagent/insight/indexer/ast_parser.py b/src/liteagent/insight/indexer/ast_parser.py
+index d9f6b7f..cb49561 100644
+--- a/src/liteagent/insight/indexer/ast_parser.py
++++ b/src/liteagent/insight/indexer/ast_parser.py
+@@ -6,9 +6,8 @@ from .graph_store import KnowledgeGraph
+ 
+ class ASTParser:
+     """Tree-sitter based parser for C# files."""
+-    def __init__(self, graph_store: KnowledgeGraph, code_collection=None):
++    def __init__(self, graph_store: KnowledgeGraph):
+         self.graph_store = graph_store
+-        self.code_collection = code_collection
+         self.parser = tree_sitter.Parser(tree_sitter.Language(tree_sitter_c_sharp.language()))
+         
+     def parse_directory(self, root_dir: Path):
+@@ -35,78 +34,17 @@ class ASTParser:
+             
+         # Clean up existing references for this file to prevent stale data
+         self.graph_store.clear_file(str(file_path))
+-        if self.code_collection:
+-            try:
+-                self.code_collection.delete(where={"file_path": str(file_path)})
+-            except Exception:
+-                pass
+                 
+         # If it's not a C# file, just index the entire file text as a single "File" symbol
+         if file_path.suffix != ".cs":
+             qname = f"file.{file_path.name}"
+             line_count = len(code_str.split('\n'))
+             self.graph_store.insert_symbol(file_path.name, qname, "File", str(file_path), 1, line_count, code_str)
+-            if self.code_collection:
+-                self.code_collection.upsert(
+-                    ids=[qname], 
+-                    documents=[code_str], 
+-                    metadatas=[{
+-                        "name": file_path.name, 
+-                        "file_path": str(file_path),
+-                        "method_name": file_path.name # Use filename as method_name for non-cs files
+-                    }]
+-                )
+             return
+             
+         tree = self.parser.parse(code_str.encode("utf8"))
+         self._extract_symbols_and_relations(tree.root_node, code_str, str(file_path))
+         
+-    def _split_with_overlap(self, text: str, chunk_size: int = 800, overlap: int = 200):
+-        chunks = []
+-        start = 0
+-        while start < len(text):
+-            end = start + chunk_size
+-            chunks.append(text[start:end])
+-            if end >= len(text):
+-                break
+-            start += chunk_size - overlap
+-        return chunks
+-
+-    def _index_method_chunks(self, method_name, class_name, signature, source, file_path):
+-        if not self.code_collection:
+-            return
+-        chunks = self._split_with_overlap(source)
+-        for i, chunk in enumerate(chunks):
+-            # Prepend signature to every chunk so each embedding carries method context
+-            enriched = f"{signature}\n{chunk}"
+-            chunk_id = f"method.{method_name}::chunk_{i}::{file_path}"
+-            self.code_collection.upsert(
+-                ids=[chunk_id],
+-                documents=[enriched],
+-                metadatas=[{
+-                    "file_path": file_path,
+-                    "class_name": class_name or "",
+-                    "method_name": method_name,
+-                    "chunk_index": i
+-                }]
+-            )
+-
+-    def _index_class_summary(self, class_name, method_signatures, file_path):
+-        if not self.code_collection:
+-            return
+-        summary = f"class {class_name}:\n" + "\n".join(method_signatures)
+-        chunk_id = f"class_summary.{class_name}::{file_path}"
+-        self.code_collection.upsert(
+-            ids=[chunk_id],
+-            documents=[summary],
+-            metadatas=[{
+-                "file_path": file_path,
+-                "class_name": class_name,
+-                "method_name": "",   # marks it as a class-level entry
+-                "chunk_index": -1
+-            }]
+-        )
+-
+     def _extract_symbols_and_relations(self, root_node, code_str, file_path):
+         lines = code_str.split('\n')
+         
+@@ -142,15 +80,6 @@ class ASTParser:
+                     qname = f"class.{name}"
+                     self.graph_store.insert_symbol(name, qname, "Class", file_path, start_line, end_line, source)
+                     
+-                    # Index class summary
+-                    if self.code_collection:
+-                        sigs = []
+-                        # Look for method children to build a "table of contents"
+-                        for child in node.children:
+-                            if child.type == "method_declaration":
+-                                sigs.append(get_method_signature(child))
+-                        self._index_class_summary(name, sigs, file_path)
+-                    
+                     prev_class = current_class
+                     current_class = name
+                     for child in node.children:
+@@ -167,10 +96,6 @@ class ASTParser:
+                     qname = f"method.{name}"
+                     self.graph_store.insert_symbol(name, qname, "Function", file_path, start_line, end_line, source, current_class)
+                     
+-                    if self.code_collection:
+-                        sig = get_method_signature(node)
+-                        self._index_method_chunks(name, current_class, sig, source, file_path)
+-                    
+                     prev_method = current_method
+                     current_method = name
+                     for child in node.children:
+diff --git a/src/liteagent/insight/indexer/graph_store.py b/src/liteagent/insight/indexer/graph_store.py
+index 7b785c6..2aceddd 100644
+--- a/src/liteagent/insight/indexer/graph_store.py
++++ b/src/liteagent/insight/indexer/graph_store.py
+@@ -1,7 +1,22 @@
++import re
+ import sqlite3
+ from pathlib import Path
+ from typing import List, Dict, Any, Optional
+ 
++
++def _split_pascal_case(text: str) -> str:
++    """Split PascalCase/camelCase into space-separated words for FTS5 indexing.
++    e.g. 'HistoryEntry' → 'History Entry', 'XMLParser' → 'XML Parser'
++    """
++    if not text:
++        return text
++    # Split at lowercase→uppercase boundary: "historyEntry" → "history Entry"
++    result = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
++    # Split at uppercase→uppercase+lowercase: "XMLParser" → "XML Parser"
++    result = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', result)
++    return result
++
++
+ class KnowledgeGraph:
+     """SQLite-backed code knowledge graph."""
+     def __init__(self, db_path: Path):
+@@ -51,6 +66,47 @@ class KnowledgeGraph:
+                     template TEXT NOT NULL
+                 )
+             """)
++            # FTS5 virtual table for fast tokenized search on symbols.
++            # Standalone (no content= sync) — we manage inserts manually with
++            # PascalCase-split values so "HistoryEntry" becomes "History Entry"
++            # and FTS5 can match queries like "history entry".
++            # 
++            # Always drop and recreate FTS5 on startup — it's just an index,
++            # and this guarantees consistency after schema changes.
++            self.conn.execute("DROP TABLE IF EXISTS symbols_fts")
++            # Drop old triggers from previous schema if they exist
++            self.conn.execute("DROP TRIGGER IF EXISTS symbols_fts_insert")
++            self.conn.execute("DROP TRIGGER IF EXISTS symbols_fts_delete")
++            self.conn.execute("DROP TRIGGER IF EXISTS symbols_fts_update")
++            
++            self.conn.execute("""
++                CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
++                    name, source_code, class_name
++                )
++            """)
++            
++            # Rebuild FTS5 index from existing symbols
++            self._rebuild_fts_index()
++
++    def _rebuild_fts_index(self):
++        """Rebuild the FTS5 index from the symbols table with PascalCase-split values.
++        Called on init to handle migration from old schema or empty FTS5.
++        """
++        # Check if FTS5 is already populated
++        cursor = self.conn.execute("SELECT count(*) FROM symbols_fts")
++        fts_count = cursor.fetchone()[0]
++        cursor = self.conn.execute("SELECT count(*) FROM symbols")
++        symbols_count = cursor.fetchone()[0]
++        
++        # Only rebuild if FTS5 is empty but symbols exist (migration or fresh start)
++        if fts_count == 0 and symbols_count > 0:
++            cursor = self.conn.execute("SELECT id, name, source_code, class_name FROM symbols")
++            rows = cursor.fetchall()
++            for row in rows:
++                self.conn.execute(
++                    "INSERT INTO symbols_fts(rowid, name, source_code, class_name) VALUES (?, ?, ?, ?)",
++                    (row[0], _split_pascal_case(row[1]), row[2], _split_pascal_case(row[3] or ""))
++                )
+ 
+     def insert_symbol(self, name: str, qualified_name: str, kind: str, file_path: str, start_line: int, end_line: int, source_code: str, class_name: Optional[str] = None):
+         with self.conn:
+@@ -66,6 +122,19 @@ class KnowledgeGraph:
+                     source_code=excluded.source_code,
+                     class_name=excluded.class_name
+             """, (name, qualified_name, kind, file_path, start_line, end_line, source_code, class_name))
++            # Get the symbol id (works for both INSERT and UPDATE)
++            cursor = self.conn.execute(
++                "SELECT id FROM symbols WHERE qualified_name=?", (qualified_name,)
++            )
++            row = cursor.fetchone()
++            if row:
++                symbol_id = row[0]
++                # Remove old FTS5 entry if exists, then insert with PascalCase-split values
++                self.conn.execute("DELETE FROM symbols_fts WHERE rowid=?", (symbol_id,))
++                self.conn.execute(
++                    "INSERT INTO symbols_fts(rowid, name, source_code, class_name) VALUES (?, ?, ?, ?)",
++                    (symbol_id, _split_pascal_case(name), source_code, _split_pascal_case(class_name or ""))
++                )
+ 
+     def insert_relationship(self, source: str, target: str, kind: str, file_path: str):
+         with self.conn:
+@@ -102,6 +171,12 @@ class KnowledgeGraph:
+     def clear_file(self, file_path: str):
+         """Removes all symbols, relationships, and templates associated with a file."""
+         with self.conn:
++            # Get symbol IDs before deleting so we can clean up FTS5
++            cursor = self.conn.execute("SELECT id FROM symbols WHERE file_path = ?", (file_path,))
++            symbol_ids = [row[0] for row in cursor.fetchall()]
++            if symbol_ids:
++                placeholders = ",".join("?" * len(symbol_ids))
++                self.conn.execute(f"DELETE FROM symbols_fts WHERE rowid IN ({placeholders})", symbol_ids)
+             self.conn.execute("DELETE FROM symbols WHERE file_path = ?", (file_path,))
+             self.conn.execute("DELETE FROM relationships WHERE file_path = ?", (file_path,))
+             self.conn.execute("DELETE FROM log_templates WHERE file_path = ?", (file_path,))
+diff --git a/src/liteagent/insight/providers.py b/src/liteagent/insight/providers.py
+index 1ef5dbd..83bd8e5 100644
+--- a/src/liteagent/insight/providers.py
++++ b/src/liteagent/insight/providers.py
+@@ -10,66 +10,10 @@ class InsightProviders:
+         insight_dir = project_dir / ".liteagent" / "insight"
+         insight_dir.mkdir(parents=True, exist_ok=True)
+         
+-        import chromadb
+         import os
+         
+-        try:
+-            if os.environ.get("LITEAGENT_TESTING") == "1":
+-                raise Exception("Testing mode enabled, skipping ML.")
+-            
+-            embed_model = os.environ.get("LITEAGENT_EMBED_MODEL", "minilm").lower()
+-            local_model_path = None
+-            if embed_model == "nomic":
+-                model_name = "nomic-ai/nomic-embed-text-v1.5"
+-            elif embed_model == "bge":
+-                model_name = "BAAI/bge-m3"
+-            else:
+-                # Check for local model in project dir, then in package dir
+-                local_model_path = project_dir / "models" / "all-MiniLM-L6-v2"
+-                if not local_model_path.exists():
+-                    pkg_model_path = Path(__file__).resolve().parent.parent.parent.parent / "models" / "all-MiniLM-L6-v2"
+-                    if pkg_model_path.exists():
+-                        local_model_path = pkg_model_path
+-                
+-                if local_model_path.exists():
+-                    model_name = str(local_model_path)
+-                else:
+-                    model_name = "all-MiniLM-L6-v2"
+-
+-            # Use SentenceTransformer directly instead of chromadb's wrapper
+-            # This gives us full control over local_files_only and avoids
+-            # chromadb's own import check that produces confusing error messages
+-            from sentence_transformers import SentenceTransformer
+-            from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+-            
+-            local_only = local_model_path is not None and local_model_path.exists()
+-            st_model = SentenceTransformer(model_name, local_files_only=local_only)
+-            
+-            class LocalSentenceTransformerFn(EmbeddingFunction):
+-                def __init__(self, model):
+-                    self._model = model
+-                def __call__(self, input: Documents) -> Embeddings:
+-                    return self._model.encode(input).tolist()
+-                def name(self) -> str:
+-                    return "sentence_transformer"
+-            
+-            emb_fn = LocalSentenceTransformerFn(st_model)
+-            print("[INFO] Semantic Search enabled (local model loaded).")
+-        except Exception as e:
+-            print(f"[WARN] ML Model skipped ({str(e)}). Semantic Search will be mocked.")
+-            from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+-            class DummyEmbeddingFunction(EmbeddingFunction):
+-                def __call__(self, input: Documents) -> Embeddings:
+-                    return [[0.0] * 384 for _ in input]
+-                def name(self) -> str:
+-                    return "sentence_transformer"
+-            emb_fn = DummyEmbeddingFunction()
+-
+-        chroma_client = chromadb.PersistentClient(path=str(insight_dir / "chromadb"))
+-        self.code_collection = chroma_client.get_or_create_collection("code_symbols", embedding_function=emb_fn)
+-
+         self.graph_store = KnowledgeGraph(insight_dir / "knowledge.db")
+-        self.ast_parser = ASTParser(self.graph_store, self.code_collection)
++        self.ast_parser = ASTParser(self.graph_store)
+         
+         # Parse directory
+         if os.environ.get("LITEAGENT_SYNC_INDEXING") == "1" or os.environ.get("LITEAGENT_TESTING") == "1":
+@@ -77,6 +21,9 @@ class InsightProviders:
+         else:
+             threading.Thread(target=self.ast_parser.parse_directory, args=(project_dir,), daemon=True).start()
+         
++        # Mutable container so the watchdog closure can update the retriever reference
++        _retriever_holder = [None]
++
+         try:
+             from watchdog.observers import Observer
+             from watchdog.events import FileSystemEventHandler
+@@ -97,11 +44,15 @@ class InsightProviders:
+                     if event.is_directory: return
+                     if self._is_valid(event.src_path):
+                         ast_parser.parse_file(Path(event.src_path))
++                        if _retriever_holder[0]:
++                            _retriever_holder[0].mark_stale()
+                         
+                 def on_created(self, event):
+                     if event.is_directory: return
+                     if self._is_valid(event.src_path):
+                         ast_parser.parse_file(Path(event.src_path))
++                        if _retriever_holder[0]:
++                            _retriever_holder[0].mark_stale()
+ 
+             observer = Observer()
+             observer.schedule(CodeChangeHandler(), str(project_dir), recursive=True)
+@@ -110,4 +61,7 @@ class InsightProviders:
+             pass
+ 
+         self.log_index = LogIndex(insight_dir / "log_index.db")
+-        self.retriever = HybridRetriever(insight_dir, self.code_collection)
++        self.retriever = HybridRetriever(insight_dir)
++        
++        # Wire up retriever reference for watchdog stale marking
++        _retriever_holder[0] = self.retriever
+diff --git a/src/liteagent/insight/retrieval/retriever.py b/src/liteagent/insight/retrieval/retriever.py
+index 329b5e0..5e0c91a 100644
+--- a/src/liteagent/insight/retrieval/retriever.py
++++ b/src/liteagent/insight/retrieval/retriever.py
+@@ -1,113 +1,265 @@
++import re
++import sqlite3
+ from pathlib import Path
+-from typing import List, Dict, Any
++from typing import List, Dict, Any, Optional
++
++# Maximum source code lines to show before truncating.
++# If a result has more lines than this, it gets truncated with a hint to use read_file.
++MAX_SOURCE_LINES = 50
++
+ 
+ class HybridRetriever:
+-    """Combines dense vector, sparse BM25, and graph-based retrieval."""
+-    def __init__(self, persist_dir: Path, code_collection=None):
++    """Multi-stage code retrieval: FTS5 → BM25 → RapidFuzz."""
++
++    def __init__(self, persist_dir: Path):
+         self.persist_dir = persist_dir
+-        self.code_collection = code_collection
++        self._bm25 = None
++        self._bm25_ids = None
++        self._bm25_stale = True
++
++    def mark_stale(self):
++        """Mark the BM25 index as stale so it rebuilds on next search."""
++        self._bm25_stale = True
++
++    def _split_pascal_case(self, text: str) -> str:
++        """Split PascalCase/camelCase into space-separated words.
++        e.g. 'HistoryEntry' → 'History Entry', 'XMLParser' → 'XML Parser'
++        """
++        if not text:
++            return text
++        result = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
++        result = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', result)
++        return result
++
++    def _tokenize(self, text: str) -> List[str]:
++        """Split text into lowercase alphanumeric tokens for BM25.
++        Handles PascalCase: 'HistoryEntry' → ['history', 'entry']
++        """
++        # First split PascalCase so tokens are separated
++        split = self._split_pascal_case(text)
++        return [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', split) if t]
++
++    def _build_bm25_index(self):
++        """Build BM25 index from all symbols in SQLite."""
++        from rank_bm25 import BM25Okapi
+ 
+-    def search(self, query: str, top_k: int = 8) -> List[Dict[str, Any]]:
+-        import sqlite3
+         db_path = self.persist_dir / "knowledge.db"
+         if not db_path.exists():
+-            return []
+-            
++            self._bm25 = None
++            self._bm25_ids = None
++            return
++
+         conn = sqlite3.connect(db_path)
+         cursor = conn.cursor()
+-        results = []
++        cursor.execute("SELECT id, name, class_name, source_code FROM symbols")
++        rows = cursor.fetchall()
++        conn.close()
++
++        if not rows:
++            self._bm25 = None
++            self._bm25_ids = None
++            return
++
++        self._bm25_ids = [row[0] for row in rows]
++        corpus = []
++        for row in rows:
++            doc = f"{row[1]} {row[2] or ''} {row[3] or ''}"
++            corpus.append(self._tokenize(doc))
++
++        self._bm25 = BM25Okapi(corpus)
++        self._bm25_stale = False
++
++    def _truncate_source(self, source_code: str, start_line: int, end_line: int) -> str:
++        """Truncate source code if it exceeds MAX_SOURCE_LINES, adding a read_file hint."""
++        lines = source_code.splitlines()
++        if len(lines) <= MAX_SOURCE_LINES:
++            return source_code
++        truncated = "\n".join(lines[:MAX_SOURCE_LINES])
++        truncated += f"\n// ... (Function/class line range {start_line}-{end_line}. Use the read_file tool to read the whole thing)"
++        return truncated
++
++    def _rank_by_name_match(self, results: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
++        """Re-rank results using 3-tier ranking:
+         
+-        # 1. Semantic Vector Search with Chunk Fusion
+-        if self.code_collection:
+-            chroma_results = self.code_collection.query(query_texts=[query], n_results=top_k * 3)
+-            
+-            # Count how many chunks matched per (file_path, method_name)
+-            match_counts = {}
+-            if chroma_results and chroma_results["metadatas"]:
+-                for meta in chroma_results["metadatas"][0]:
+-                    if not meta.get("method_name"):
+-                        # class-level summary hit — use it to boost ranking but skip for direct return
+-                        # unless we decide to return class source (not planned for now)
+-                        continue
+-                    key = (meta["file_path"], meta["method_name"])
+-                    match_counts[key] = match_counts.get(key, 0) + 1
+-
+-            # Sort by match count descending, take top_k unique methods
+-            ranked = sorted(match_counts.items(), key=lambda x: x[1], reverse=True)[:top_k]
+-
+-            for (file_path, method_name), score in ranked:
+-                cursor.execute(
+-                    "SELECT file_path, name, class_name, source_code FROM symbols WHERE name=? AND file_path=?",
+-                    (method_name, file_path)
+-                )
+-                row = cursor.fetchone()
+-                if row:
+-                    results.append({
+-                        "file_path": row[0],
+-                        "symbol_name": row[1],
+-                        "class_name": row[2] or "",
+-                        "source_code": row[3],
+-                        "match_score": score
+-                    })
+-
+-            if results:
+-                conn.close()
+-                return results
+-
+-        # 2. Fallback to Sparse/Keyword SQLite Search
+-        words = [w for w in query.split() if len(w) > 3]
+-        if not words:
+-            words = [query]
++        1. Perfect name match: all query tokens match the symbol's name or class_name
++        2. Partial name match: some query tokens match name or class_name
++        3. Code-only match: no name/class_name overlap (matched via source_code)
++        
++        Within each tier, original order is preserved.
++        """
++        query_tokens = set(self._tokenize(query))
++        
++        perfect_matches = []
++        partial_matches = []
++        code_only_matches = []
++        
++        for r in results:
++            # Check both the symbol name (e.g. "HistoryEntry") and class_name
++            symbol_tokens = set(self._tokenize(r.get("name", "") or ""))
++            class_tokens = set(self._tokenize(r.get("class_name", "") or ""))
++            all_name_tokens = symbol_tokens | class_tokens
+             
+-        conditions = []
+-        params = []
+-        for word in words:
+-            conditions.append("(source_code LIKE ? OR name LIKE ?)")
+-            params.extend([f"%{word}%", f"%{word}%"])
++            overlap = query_tokens & all_name_tokens
+             
+-        where_clause = " OR ".join(conditions)
++            if not overlap:
++                code_only_matches.append(r)
++            elif overlap == query_tokens:
++                # All query tokens found in name/class_name — perfect match
++                perfect_matches.append(r)
++            else:
++                # Some but not all query tokens match — partial match
++                partial_matches.append(r)
+         
+-        cursor.execute(
+-            f"SELECT file_path, name, class_name, source_code FROM symbols WHERE {where_clause} LIMIT ?", 
+-            (*params, top_k)
+-        )
+-        
+-        for row in cursor.fetchall():
++        return perfect_matches + partial_matches + code_only_matches
++
++    def search(self, query: str, top_k: int = 2) -> List[Dict[str, Any]]:
++        db_path = self.persist_dir / "knowledge.db"
++        if not db_path.exists():
++            return []
++
++        conn = sqlite3.connect(db_path)
++        cursor = conn.cursor()
++        results = []
++
++        # Stage 1: FTS5 tokenized search
++        results = self._search_fts5(cursor, query, top_k)
++        if results:
++            results = self._rank_by_name_match(results, query)[:top_k]
++            conn.close()
++            return self._apply_truncation(results)
++
++        # Stage 2: BM25 scoring
++        results = self._search_bm25(cursor, query, top_k)
++        if results:
++            results = self._rank_by_name_match(results, query)[:top_k]
++            conn.close()
++            return self._apply_truncation(results)
++
++        # Stage 3: RapidFuzz fuzzy match
++        results = self._search_fuzzy(cursor, query, top_k)
++        conn.close()
++        return self._apply_truncation(results)
++
++    def _search_fts5(self, cursor, query: str, top_k: int) -> List[Dict[str, Any]]:
++        """Stage 1: Fast tokenized search using SQLite FTS5."""
++        # Tokenize with PascalCase splitting so "history entry" matches "History Entry"
++        tokens = self._tokenize(query)
++        if not tokens:
++            return []
++        fts_query = " ".join(tokens)
++
++        try:
++            # FTS5 is standalone (no content=sync), so we JOIN on rowid = symbols.id
++            cursor.execute("""
++                SELECT s.file_path, s.name, s.class_name, s.source_code, s.start_line, s.end_line
++                FROM symbols s
++                JOIN symbols_fts fts ON s.id = fts.rowid
++                WHERE symbols_fts MATCH ?
++                ORDER BY rank
++                LIMIT ?
++            """, (fts_query, top_k * 5))
++            rows = cursor.fetchall()
++        except Exception:
++            return []
++
++        results = []
++        for row in rows:
+             results.append({
+                 "file_path": row[0],
+-                "symbol_name": row[1],
++                "name": row[1],
+                 "class_name": row[2] or "",
+                 "source_code": row[3],
+-                "match_score": 0.50
++                "start_line": row[4],
++                "end_line": row[5],
+             })
+-            
+-        conn.close()
+         return results
+ 
+-    def _expand_with_callees(self, results, cursor, top_k):
+-        """For each returned method, attach signatures of methods it calls."""
+-        expanded = list(results)
+-        seen = {(r["file_path"], r["symbol_name"]) for r in results}
++    def _search_bm25(self, cursor, query: str, top_k: int) -> List[Dict[str, Any]]:
++        """Stage 2: BM25Okapi scoring for proper TF-IDF ranking."""
++        if self._bm25_stale or self._bm25 is None:
++            self._build_bm25_index()
++
++        if self._bm25 is None or self._bm25_ids is None:
++            return []
++
++        tokenized_query = self._tokenize(query)
++        if not tokenized_query:
++            return []
++
++        scores = self._bm25.get_scores(tokenized_query)
++        # Get top_k indices by score
++        ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
++
++        results = []
++        for idx in ranked:
++            if scores[idx] <= 0:
++                break
++            if len(results) >= top_k:
++                break
+ 
+-        for r in results[:3]:   # only expand top 3 to avoid bloat
++            symbol_id = self._bm25_ids[idx]
+             cursor.execute(
+-                "SELECT target FROM relationships WHERE source=? AND file_path=?",
+-                (r["symbol_name"], r["file_path"])
++                "SELECT file_path, name, class_name, source_code, start_line, end_line FROM symbols WHERE id=?",
++                (symbol_id,)
+             )
+-            for (callee,) in cursor.fetchall():
+-                cursor.execute(
+-                    "SELECT file_path, name, class_name, source_code FROM symbols WHERE name=?",
+-                    (callee,)
+-                )
+-                row = cursor.fetchone()
+-                if row and (row[0], row[1]) not in seen:
+-                    seen.add((row[0], row[1]))
+-                    expanded.append({
+-                        "file_path": row[0],
+-                        "symbol_name": row[1],
+-                        "class_name": row[2] or "",
+-                        "source_code": row[3],
+-                        "match_score": 0,   # not a direct hit, context only
+-                        "context_note": f"called by {r['symbol_name']}"
+-                    })
+-        return expanded
++            row = cursor.fetchone()
++            if row:
++                results.append({
++                    "file_path": row[0],
++                    "name": row[1],
++                    "class_name": row[2] or "",
++                    "source_code": row[3],
++                    "start_line": row[4],
++                    "end_line": row[5],
++                })
++        return results
++
++    def _search_fuzzy(self, cursor, query: str, top_k: int) -> List[Dict[str, Any]]:
++        """Stage 3: RapidFuzz partial_ratio for typos, partial names, rephrasing."""
++        try:
++            from rapidfuzz import fuzz
++        except ImportError:
++            return []
++
++        cursor.execute("SELECT file_path, name, class_name, source_code, start_line, end_line FROM symbols")
++        rows = cursor.fetchall()
++
++        if not rows:
++            return []
++
++        THRESHOLD = 65
++        query_lower = query.lower()
++        scored = []
++
++        for row in rows:
++            name = row[1] or ""
++            class_name = row[2] or ""
++            # Score against both name and class_name, take the best
++            name_score = fuzz.partial_ratio(query_lower, name.lower())
++            class_score = fuzz.partial_ratio(query_lower, class_name.lower())
++            best_score = max(name_score, class_score)
++
++            if best_score >= THRESHOLD:
++                scored.append((best_score, row))
++
++        scored.sort(key=lambda x: x[0], reverse=True)
++
++        results = []
++        for score, row in scored[:top_k]:
++            results.append({
++                "file_path": row[0],
++                "name": row[1],
++                "class_name": row[2] or "",
++                "source_code": row[3],
++                "start_line": row[4],
++                "end_line": row[5],
++            })
++        return results
++
++    def _apply_truncation(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
++        """Apply source code truncation to all results."""
++        for r in results:
++            r["source_code"] = self._truncate_source(
++                r["source_code"], r.get("start_line", 0), r.get("end_line", 0)
++            )
++        return results
+diff --git a/src/liteagent/tools/factory.py b/src/liteagent/tools/factory.py
+index ea3e455..1283d4a 100644
+--- a/src/liteagent/tools/factory.py
++++ b/src/liteagent/tools/factory.py
+@@ -31,7 +31,7 @@ class ToolFactory:
+         ]
+         if include_insight:
+             tools.extend([
+-            #   create_search_code_tool(providers),
++                create_search_code_tool(providers),
+                 create_search_logs_tool(providers),
+             ])
+         return tools
+diff --git a/src/liteagent/tools/search_code_tool.py b/src/liteagent/tools/search_code_tool.py
+index f727f52..78abd09 100644
+--- a/src/liteagent/tools/search_code_tool.py
++++ b/src/liteagent/tools/search_code_tool.py
+@@ -1,18 +1,27 @@
+ from .providers import ToolProviderFactory
+ 
++MAX_TOP_K = 5
++DEFAULT_TOP_K = 2
++
+ def create_search_code_tool(providers: ToolProviderFactory):
+-    def search_code(query: str, top_k: int = 3) -> str:
++    def search_code(query: str, top_k: int = DEFAULT_TOP_K) -> str:
+         """
+-        Searches the codebase for specific functionality, concepts, or logic.
+-        Use this when you need to find code but don't know the exact file names.
+-        Returns the file path, symbol name, and source code snippet.
++        Searches the codebase for classes, methods, or functions by name or keyword.
++        Use class or method names as queries for best results.
++        Results where the query matches a class/method name are ranked first.
++        Returns the file path, class name, and source code snippet.
+         
+         Args:
+-            query: The search query, concept, or logic to look for.
+-            top_k: The maximum number of results to return (default: 3).
++            query: Class name, method name, or space-separated keywords to search for.
++            top_k: Maximum number of results to return. Default is 2, maximum is 5.
+         """
++
+         try:
+-            top_k = int(top_k) if top_k not in (None, "") else 3
++            top_k = int(top_k) if top_k not in (None, "") else DEFAULT_TOP_K
++            if top_k < 1:
++                top_k = 1
++            if top_k > MAX_TOP_K:
++                top_k = MAX_TOP_K
+             results = providers.insight.retriever.search(query, top_k)
+             if not results:
+                 return f"No code found matching: {query}"
+@@ -22,9 +31,6 @@ def create_search_code_tool(providers: ToolProviderFactory):
+                 header = f"File: {r['file_path']}"
+                 if r.get("class_name"):
+                     header += f"\nClass: {r['class_name']}"
+-                header += f"\nSymbol: {r.get('symbol_name', 'Unknown')}"
+-                if r.get("context_note"):
+-                    header += f"\n[Context: {r['context_note']}]"
+                 output.append(f"{header}\nCode:\n{r['source_code']}\n---")
+             return "\n".join(output)
+         except Exception as e:
+-- 
+2.53.0.windows.2
+
