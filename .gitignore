@@ -160,3 +160,4 @@ cython_debug/
 .antigravitycli/
 tests/
 .liteagent/
+.git/
