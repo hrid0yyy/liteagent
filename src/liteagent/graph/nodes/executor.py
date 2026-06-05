@@ -13,14 +13,6 @@ from ...tools.registry import registry
 from ...cli.formatter import console
 
 def _extract_paths_for_diff(tool_name: str, args: Dict[str, Any]) -> List[str]:
-    if tool_name == "write_file":
-        file_path = args.get("file_path")
-        return [file_path] if isinstance(file_path, str) and file_path.strip() else []
-
-    if tool_name == "modify_file":
-        file_path = args.get("file_path")
-        return [file_path] if isinstance(file_path, str) and file_path.strip() else []
-
     return []
 
 def _read_text_if_exists(file_path: str):
@@ -48,11 +40,6 @@ def _build_unified_diff(file_path: str, before, after):
 
 
 def _tool_succeeded(name: str, result: Any) -> bool:
-    text = str(result)
-    if name == "write_file":
-        return text.startswith("Successfully wrote to ")
-    if name == "modify_file":
-        return ("Error" not in text) and ("Successfully applied" in text)
     return True
 
 
@@ -316,20 +303,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             log_event("tool_execute_start", "executor", {"name": name, "typed_args": typed_args, "touched_paths": touched_paths}, turn_index=app_state.turn_index)
             
             # Non-blocking tool execution
-            if name == "run_shell_command":
-                # Inject on_output callback for live streaming
-                from ...cli.formatter import start_live_stream, stop_live_stream
-                
-                live = start_live_stream(f"Running: {typed_args.get('command')}")
-                def on_output(line):
-                    live.update(line)
-                
-                try:
-                    typed_args["on_output"] = on_output
-                    result = await func(**typed_args)
-                finally:
-                    stop_live_stream()
-            elif inspect.iscoroutinefunction(func):
+            if inspect.iscoroutinefunction(func):
                 result = await func(**typed_args)
             else:
                 result = await asyncio.to_thread(func, **typed_args)
@@ -345,12 +319,6 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
                     if diff_text:
                         diffs.append({"path": path, "diff": diff_text})
 
-            if name in {"write_file", "modify_file"} and _tool_succeeded(name, result):
-                for path in touched_paths:
-                    after_content = after_contents.get(path)
-                    if after_content is None:
-                        continue
-                    get_container().read_tracker.record_agent_write(path, after_content, operation_id=str(tool_call_id))
             log_event("tool_execute_end", "executor", {"name": name, "result": result, "diffs": diffs}, turn_index=app_state.turn_index)
 
             outputs.append({

@@ -91,8 +91,6 @@ def format_message(message: dict, show_thinking: bool = True):
                         context = ", ".join(paths)
                     else:
                         context = str(paths)
-                elif name in {"write_file", "modify_file"}:
-                    context = args.get("file_path", "")
                 elif name == "list_files":
                     pattern = args.get("pattern", "")
                     dir_path = args.get("dir_path", ".")
@@ -101,14 +99,6 @@ def format_message(message: dict, show_thinking: bool = True):
                     pattern = args.get("pattern", "")
                     dir_path = args.get("dir_path", ".")
                     context = f"'{pattern}' in {dir_path}"
-                elif name == "rename_path":
-                    old = args.get("old_path", "")
-                    new = args.get("new_path", "")
-                    context = f"{old} -> {new}"
-                elif name == "delete_path":
-                    context = args.get("path_to_delete", "")
-                elif name == "run_shell_command":
-                    context = args.get("command", "")
                 
                 display_name = f"[cyan]{name}[/cyan]"
                 if context:
@@ -125,31 +115,4 @@ def format_message(message: dict, show_thinking: bool = True):
         pass
 
 def format_tool_output(tool_output: dict):
-    name = tool_output.get("name")
-    if name not in {"write_file", "modify_file"}:
-        return
-
-    diffs = tool_output.get("diffs", [])
-    for item in diffs:
-        path = item.get("path", "unknown")
-        diff = item.get("diff", "")
-
-        if Path(path).suffix.lower() == ".md":
-            render_markdown(path)
-            continue
-
-        if not diff:
-            continue
-
-        console.print(f"[bold]Diff[/bold] [cyan]{path}[/cyan]")
-        for line in diff.splitlines():
-            if line.startswith("@@"):
-                console.print(line, style="cyan", markup=False)
-            elif line.startswith("+++ ") or line.startswith("--- "):
-                console.print(line, style="bold", markup=False)
-            elif line.startswith("+"):
-                console.print(line, style="green", markup=False)
-            elif line.startswith("-"):
-                console.print(line, style="red", markup=False)
-            else:
-                console.print(line, style="dim", markup=False)
+    pass

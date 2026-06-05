@@ -25,21 +25,6 @@ SAMPLE_INPUTS = {
         "startLine": "1",
         "range": "3"
     },
-    "write_file": {
-        "file_path": "new_file.txt",
-        "content": "Hello, World!"
-    },
-    "rename_path": {
-        "old_path": "old_name.txt",
-        "new_path": "new_name.txt"
-    },
-    "delete_path": {
-        "path_to_delete": "obsolete_folder"
-    },
-    "modify_file": {
-        "file_path": "example.py",
-        "edits": ">>> SEARCH\nold code\n+++ REPLACE\nnew code"
-    },
     "search_logs": {
         "query": "ERROR",
         "is_plain": "true",
@@ -47,11 +32,7 @@ SAMPLE_INPUTS = {
         "last_hours": "24",
         "limit": "1"
     },
-    "extract_log_patterns": {},
-    "run_shell_command": {
-        "command": "dir",
-        "timeout": "60"
-    }
+    "extract_log_patterns": {}
 }
 
 class ToolRegistry:
