@@ -12,6 +12,7 @@ from .modify_file_tool import create_modify_file_tool
 from .run_shell_command_tool import create_run_shell_command_tool
 from .search_code_tool import create_search_code_tool
 from .search_logs_tool import create_search_logs_tool
+from .extract_log_patterns_tool import create_extract_log_patterns_tool
 
 class ToolFactory:
     @staticmethod
@@ -33,5 +34,6 @@ class ToolFactory:
             tools.extend([
                 create_search_code_tool(providers),
                 create_search_logs_tool(providers),
+                create_extract_log_patterns_tool(providers),
             ])
         return tools

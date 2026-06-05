@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+from itertools import islice
 from .providers import ToolProviderFactory
 
 MAX_RANGE = 5
@@ -31,24 +32,26 @@ def create_read_log_lineRange_tool(providers: ToolProviderFactory):
             if not file_path.exists():
                 return f"Error: Log file {path} does not exist."
 
-            raw_content = file_path.read_text(encoding="utf-8")
-            lines = raw_content.splitlines()
-
             if startLine < 1:
                 startLine = 1
 
             start_idx = startLine - 1
-            end_idx = start_idx + range
 
-            selected_lines = lines[start_idx:end_idx]
+            # Stream only the needed lines instead of loading the entire file
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                selected_lines = list(islice(f, start_idx, start_idx + range))
+
+            # Strip newline characters
+            selected_lines = [line.rstrip("\n").rstrip("\r") for line in selected_lines]
 
             if not selected_lines:
-                return f"Error: No lines found in range (startLine={startLine}, range={range}). File has {len(lines)} lines."
+                return f"Error: No lines found in range (startLine={startLine}, range={range})."
 
             numbered_lines = [f"{i + 1 + start_idx}: {line}" for i, line in enumerate(selected_lines)]
             content = "\n".join(numbered_lines)
 
-            result_str = f"--- {path} (Lines {startLine}-{min(startLine + range - 1, len(lines))}) ---\n{content}\n--- End of selection ---"
+            end_line = startLine + len(selected_lines) - 1
+            result_str = f"--- {path} (Lines {startLine}-{end_line}) ---\n{content}\n--- End of selection ---"
             if warnings:
                 result_str += "\n\n⚠ CONSTRAINT VIOLATION: " + " | ".join(warnings)
             return result_str

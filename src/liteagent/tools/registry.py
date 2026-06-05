@@ -47,6 +47,7 @@ SAMPLE_INPUTS = {
         "last_hours": "24",
         "limit": "1"
     },
+    "extract_log_patterns": {},
     "run_shell_command": {
         "command": "dir",
         "timeout": "60"

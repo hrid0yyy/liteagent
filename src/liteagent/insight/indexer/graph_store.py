@@ -168,6 +168,57 @@ class KnowledgeGraph:
                 VALUES (?, ?, ?, ?)
             """, templates)
             
+    def get_log_templates(self) -> List[Dict[str, Any]]:
+        """Get all log templates grouped by file_path and method_name."""
+        cursor = self.conn.execute(
+            "SELECT file_path, method_name, level, template FROM log_templates ORDER BY file_path, method_name"
+        )
+        rows = cursor.fetchall()
+        return [{"file_path": r[0], "method_name": r[1], "level": r[2], "template": r[3]} for r in rows]
+
+    def get_methods_for_file(self, file_path: str) -> List[Dict[str, Any]]:
+        """Get all methods in a file with their line ranges."""
+        cursor = self.conn.execute(
+            "SELECT name, start_line, end_line, class_name FROM symbols WHERE kind='Function' AND file_path=? ORDER BY start_line",
+            (file_path,)
+        )
+        rows = cursor.fetchall()
+        return [{"name": r[0], "start_line": r[1], "end_line": r[2], "class_name": r[3]} for r in rows]
+
+    def find_matching_templates(self, log_line: str) -> List[Dict[str, Any]]:
+        """Find all log templates that match a given log line.
+        Returns list of dicts with file_path, method_name, level, template, and method line range.
+        """
+        cursor = self.conn.execute(
+            "SELECT file_path, method_name, level, template FROM log_templates"
+        )
+        rows = cursor.fetchall()
+        
+        matches = []
+        for row in rows:
+            file_path, method_name, level, template = row
+            try:
+                if re.search(template, log_line, re.IGNORECASE):
+                    # Get method line range
+                    method_cursor = self.conn.execute(
+                        "SELECT start_line, end_line FROM symbols WHERE name=? AND file_path=? AND kind='Function'",
+                        (method_name, file_path)
+                    )
+                    method_info = method_cursor.fetchone()
+                    result = {
+                        "file_path": file_path,
+                        "method_name": method_name,
+                        "level": level,
+                    }
+                    if method_info:
+                        result["start_line"] = method_info[0]
+                        result["end_line"] = method_info[1]
+                    matches.append(result)
+            except re.error:
+                pass
+        
+        return matches
+
     def clear_file(self, file_path: str):
         """Removes all symbols, relationships, and templates associated with a file."""
         with self.conn:
