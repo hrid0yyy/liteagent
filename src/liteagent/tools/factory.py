@@ -8,6 +8,9 @@ from .read_log_lineRange_tool import create_read_log_lineRange_tool
 from .search_logs_tool import create_search_logs_tool
 from .extract_log_patterns_tool import create_extract_log_patterns_tool
 from .search_code_tool import create_search_code_tool
+from .trace_log_to_code_tool import create_trace_log_to_code_tool
+from .trace_method_workflows_tool import create_trace_method_workflows_tool
+from .time_based_log_tools import create_get_log_time_bounds_tool, create_read_log_time_range_tool
 
 class ToolFactory:
     @staticmethod
@@ -25,5 +28,9 @@ class ToolFactory:
                 create_search_code_tool(providers),
                 create_search_logs_tool(providers),
                 create_extract_log_patterns_tool(providers),
+                create_trace_log_to_code_tool(providers),
+                create_trace_method_workflows_tool(providers),
+                create_get_log_time_bounds_tool(providers),
+                create_read_log_time_range_tool(providers),
             ])
         return tools

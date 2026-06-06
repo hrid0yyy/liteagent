@@ -25,10 +25,10 @@ class AnalyzerConfig:
         if self._config_path.exists():
             try:
                 return json.loads(self._config_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                return {"logs": {}, "issues": {}}
         
-        # Create a template configuration if it doesn't exist
+        # Create a template configuration ONLY if the file literally doesn't exist
         template = {
             "logs": {
                 "exmp": "C:/path/to/your/app.log"
