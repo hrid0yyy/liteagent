@@ -2,6 +2,7 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import threading
 
 
 def _split_pascal_case(text: str) -> str:
@@ -26,6 +27,7 @@ class KnowledgeGraph:
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         # Enable WAL mode for better concurrency (multiple readers + one writer)
         self.conn.execute("PRAGMA journal_mode=WAL")
+        self.write_lock = threading.Lock()
         self._init_db()
 
     def _init_db(self):
@@ -109,7 +111,7 @@ class KnowledgeGraph:
                 )
 
     def insert_symbol(self, name: str, qualified_name: str, kind: str, file_path: str, start_line: int, end_line: int, source_code: str, class_name: Optional[str] = None):
-        with self.conn:
+        with self.write_lock, self.conn:
             self.conn.execute("""
                 INSERT INTO symbols (name, qualified_name, kind, file_path, start_line, end_line, source_code, class_name)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -137,7 +139,7 @@ class KnowledgeGraph:
                 )
 
     def insert_relationship(self, source: str, target: str, kind: str, file_path: str):
-        with self.conn:
+        with self.write_lock, self.conn:
             self.conn.execute("""
                 INSERT INTO relationships (source, target, kind, file_path)
                 VALUES (?, ?, ?, ?)
@@ -146,14 +148,14 @@ class KnowledgeGraph:
     def insert_relationships(self, relationships: List[tuple]):
         """Batch insert relationships: List of (source, target, kind, file_path)"""
         if not relationships: return
-        with self.conn:
+        with self.write_lock, self.conn:
             self.conn.executemany("""
                 INSERT INTO relationships (source, target, kind, file_path)
                 VALUES (?, ?, ?, ?)
             """, relationships)
             
     def insert_log_template(self, file_path: str, method_name: str, level: str, template: str):
-        with self.conn:
+        with self.write_lock, self.conn:
             self.conn.execute("""
                 INSERT INTO log_templates (file_path, method_name, level, template)
                 VALUES (?, ?, ?, ?)
@@ -162,7 +164,7 @@ class KnowledgeGraph:
     def insert_log_templates(self, templates: List[tuple]):
         """Batch insert log templates: List of (file_path, method_name, level, template)"""
         if not templates: return
-        with self.conn:
+        with self.write_lock, self.conn:
             self.conn.executemany("""
                 INSERT INTO log_templates (file_path, method_name, level, template)
                 VALUES (?, ?, ?, ?)
@@ -221,7 +223,7 @@ class KnowledgeGraph:
 
     def clear_file(self, file_path: str):
         """Removes all symbols, relationships, and templates associated with a file."""
-        with self.conn:
+        with self.write_lock, self.conn:
             # Get symbol IDs before deleting so we can clean up FTS5
             cursor = self.conn.execute("SELECT id FROM symbols WHERE file_path = ?", (file_path,))
             symbol_ids = [row[0] for row in cursor.fetchall()]

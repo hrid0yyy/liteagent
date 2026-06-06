@@ -1,6 +1,8 @@
 import asyncio
+import os
 import socket
 from typing import Any, Dict, Optional
+from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
@@ -32,6 +34,51 @@ async def execute_tool(data: dict = Body(...)):
         log_error("server", e, {"tool_name": tool_name, "params": params, "traceback": traceback.format_exc()})
         return {"error": str(e) + "\n" + traceback.format_exc()}
 
+
+# ── Logbase Extraction Actions (parameter-less) ─────────────────────
+
+def _run_extraction(empty: bool) -> Dict[str, Any]:
+    """Shared extraction logic for both Inspector actions."""
+    from ..insight.providers import InsightProviders
+    from ..insight.logs.logbase_extractor import LogbaseExtractor
+
+    project_dir = Path(os.getcwd())
+    progress_log: list[str] = []
+
+    try:
+        insight = InsightProviders(project_dir)
+        extractor = LogbaseExtractor(project_dir, insight.graph_store)
+
+        def on_progress(current: int, total: int, method_name: str):
+            progress_log.append(f"[{current}/{total}] Processing {method_name}()")
+
+        result = extractor.extract(empty=empty, on_progress=on_progress)
+
+        method_count = sum(
+            len(methods)
+            for classes in result.values()
+            for methods in classes.values()
+        )
+        summary = f"Extracted {method_count} methods across {len(result)} files."
+        return {"status": "success", "summary": summary, "progress": progress_log}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+
+
+@app.post("/api/actions/extract-log-with-description")
+async def extract_log_with_description():
+    """Run logbase extraction WITH LLM descriptions (no parameters)."""
+    log_event("extract_log_with_description", "server", {})
+    return _run_extraction(empty=False)
+
+
+@app.post("/api/actions/extract-log-empty")
+async def extract_log_empty():
+    """Run logbase extraction WITHOUT LLM descriptions (no parameters)."""
+    log_event("extract_log_empty", "server", {})
+    return _run_extraction(empty=True)
+
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
     return """
@@ -62,6 +109,26 @@ async def get_index():
                 </span>
             </div>
         </header>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6">
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">System Actions</h3>
+            <div class="flex items-center gap-3 flex-wrap">
+                <button id="btn-extract-desc" onclick="runExtraction('extract-log-with-description')"
+                        class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-all text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    extract-log-with-description
+                </button>
+                <button id="btn-extract-empty" onclick="runExtraction('extract-log-empty')"
+                        class="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl transition-all text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    extract-log-empty
+                </button>
+                <span id="extraction-status" class="text-sm text-slate-500"></span>
+            </div>
+            <div id="extraction-result" class="hidden mt-4">
+                <pre id="extraction-output" class="bg-slate-900 text-slate-100 p-4 rounded-xl text-sm font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto"></pre>
+            </div>
+        </div>
 
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6">
             <label class="block text-sm font-semibold text-slate-700 mb-2">Select a Tool</label>
@@ -264,6 +331,43 @@ async def get_index():
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        async function runExtraction(actionName) {
+            const statusEl = document.getElementById('extraction-status');
+            const resultContainer = document.getElementById('extraction-result');
+            const resultOutput = document.getElementById('extraction-output');
+
+            statusEl.textContent = 'Running...';
+            statusEl.className = 'text-sm text-amber-600 animate-pulse';
+
+            try {
+                const res = await fetch(`/api/actions/${actionName}`, { method: 'POST' });
+                const data = await res.json();
+
+                resultContainer.classList.remove('hidden');
+                if (data.status === 'success') {
+                    let output = data.summary + '\\n\\n';
+                    if (data.progress && data.progress.length > 0) {
+                        output += data.progress.join('\\n');
+                    }
+                    resultOutput.textContent = output;
+                    resultOutput.className = 'bg-slate-900 text-emerald-400 p-4 rounded-xl text-sm font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto';
+                    statusEl.textContent = 'Done';
+                    statusEl.className = 'text-sm text-emerald-600';
+                } else {
+                    resultOutput.textContent = 'Error: ' + (data.error || 'Unknown error');
+                    resultOutput.className = 'bg-slate-900 text-rose-400 p-4 rounded-xl text-sm font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto';
+                    statusEl.textContent = 'Failed';
+                    statusEl.className = 'text-sm text-rose-600';
+                }
+            } catch (err) {
+                resultContainer.classList.remove('hidden');
+                resultOutput.textContent = 'Error: ' + err.message;
+                resultOutput.className = 'bg-slate-900 text-rose-400 p-4 rounded-xl text-sm font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto';
+                statusEl.textContent = 'Failed';
+                statusEl.className = 'text-sm text-rose-600';
+            }
         }
 
         loadTools();

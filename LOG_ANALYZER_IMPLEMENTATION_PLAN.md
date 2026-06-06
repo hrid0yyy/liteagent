@@ -2,32 +2,33 @@
 
 This document breaks down the `LOG_ANALYZER_PLAN.md` into actionable implementation steps.
 
-## Phase 1: Configuration Management
+## Phase 1: Configuration Management ✅
 **Goal:** Establish persistent storage for logs and issue configurations.
-1. **Create Config Manager**: 
-   - Implement logic to initialize, read, and update `.liteagent/analyzer_config.json`.
-   - Define the schema for storing log paths and issue descriptions with their associated 4-character unique IDs.
-   - Implement helper functions for adding, editing, removing, and renaming entries.
+1. **Create Config Manager**: ✅
+   - Created `src/liteagent/core/analyzer_config.py`.
+   - Schema stores log paths and issue descriptions with 4-character unique IDs in `.liteagent/analyzer_config.json`.
+   - Helper methods for add, edit, remove, rename, and list operations.
 
-## Phase 2: Logbase Extraction Engine
+## Phase 2: Logbase Extraction Engine ✅
 **Goal:** Build the system that parses code for log statements, generates descriptions, and tracks changes.
-1. **AST Parsing & Hashing**:
-   - Create `src/liteagent/insight/logs/logbase_extractor.py`.
-   - Implement AST parsing to identify all classes and methods in the codebase.
-   - Implement method-level hashing to detect changes between runs.
-   - Extract log statements and their corresponding `line_range` for each method.
-2. **LLM Integration**:
-   - Implement the LLM call to generate functional descriptions for methods containing logs.
-   - Set up the real-time progress feedback in the terminal (e.g., `[3/10] Generating description for process_payment()...`).
-3. **Persistence & Schema**:
-   - Save the extraction results to `.liteagent/logbase.json` ensuring the strict hierarchical format: `Filepath` -> `Class` -> `Method` -> `{ log_lines, description, line_range }`.
-4. **Incremental Efficiency**:
-   - Wire up the hashing logic so that the LLM is only called for methods whose hash has changed since the last run.
+1. **AST Parsing & Hashing**: ✅
+   - Created `src/liteagent/insight/logs/logbase_extractor.py`.
+   - Leverages the existing `KnowledgeGraph` for method and log template data (no duplicate AST parsing).
+   - Method-level SHA-256 hashing for incremental change detection.
+   - Extracts `log_lines` and `line_range` for each method.
+2. **LLM Integration**: ✅ (infrastructure ready)
+   - Accepts an `llm_describe(method_name, source, log_lines)` callable for description generation.
+   - Real-time progress callback `on_progress(current, total, method_name)` for CLI/Inspector.
+3. **Persistence & Schema**: ✅
+   - Saves to `.liteagent/logbase.json` in the strict hierarchy: `Filepath` → `Class` → `Method` → `{ log_lines, description, line_range }`.
+   - Hashes saved separately in `.liteagent/logbase_hashes.json`.
+4. **Incremental Efficiency**: ✅
+   - Compares current hash against cached hash; reuses cached description if unchanged.
 
-## Phase 3: Client-Side REPL & Tool Inspector
+## Phase 3: Client-Side REPL & Tool Inspector ✅
 **Goal:** Implement the user interfaces for configuring and extracting logs.
-1. **REPL Interceptor (`src/liteagent/cli/main.py`)**:
-   - Intercept and implement the following client-side commands without invoking the LLM:
+1. **REPL Interceptor (`src/liteagent/cli/main.py`)**: ✅
+   - All slash commands implemented via `_handle_slash_command()`:
      - `/addlog <file_path>`
      - `/addissue <issue_description>`
      - `/logs`
@@ -35,11 +36,14 @@ This document breaks down the `LOG_ANALYZER_PLAN.md` into actionable implementat
      - `/rmlog <id>` / `/rmissue <id>`
      - `/editlog <id> <new_path>` / `/editissue <id> <new_description>`
      - `/renameid <old_id> <new_id>`
-   - Implement `/extractlogs [--empty]` to trigger the extraction engine manually. Ensure `--empty` bypasses the LLM description generation.
-2. **Tool Inspector Integration**:
-   - Register the extraction actions in the Tool Inspector web UI (`liteagent chat -i`).
-   - Add the two parameter-less options: `extract-log-with-description` and `extract-log-empty`.
-   - Ensure the UI reflects the real-time progress feedback identical to the CLI.
+     - `/extractlogs [--empty]`
+   - Old `/config-add-log` handler replaced.
+2. **Tool Inspector Integration (`src/liteagent/cli/server.py`)**: ✅
+   - Two parameter-less API endpoints added:
+     - `POST /api/actions/extract-log-with-description`
+     - `POST /api/actions/extract-log-empty`
+   - Inspector HTML updated with "System Actions" panel containing two styled buttons.
+   - `runExtraction()` JS function handles progress display and results.
 
 ## Phase 4: Analysis Pipeline & Integration
 **Goal:** Connect the config, the logbase, and the LangGraph loop for root cause analysis.

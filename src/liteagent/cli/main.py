@@ -12,6 +12,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from ..core.config import settings
 from ..core.state import app_state
+from ..core.analyzer_config import AnalyzerConfig
 # LLM providers are now imported via the factory
 from ..graph.builder import create_graph
 from ..core.logger import start_session_logger, end_session_logger, log_event, log_error
@@ -208,6 +209,9 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
     )
     graph = create_graph(provider)
 
+    # Initialize persistent analyzer configuration
+    analyzer_config = AnalyzerConfig(Path(os.getcwd()))
+
     if resume:
         console.print(Panel(f"Resuming session: {session_id}", title="LiteAgent Chat", expand=False))
         for msg in state["messages"]:
@@ -268,21 +272,10 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
                 break
             
             # Handle slash commands
-            if user_input.strip().startswith("/config-add-log"):
-                parts = user_input.strip().split(maxsplit=1)
-                if len(parts) < 2:
-                    console.print("[red]Error:[/red] Please provide a log file path. Usage: /config-add-log <path>")
-                else:
-                    log_path = parts[1]
-                    abs_path = str(Path(log_path).absolute())
-                    if abs_path not in settings.insight_log_paths:
-                        settings.insight_log_paths.append(abs_path)
-                        console.print(f"[green]Added log path:[/green] {abs_path}")
-                        if not Path(abs_path).exists():
-                            console.print(f"[yellow]Warning:[/yellow] File does not exist yet: {abs_path}")
-                    else:
-                        console.print(f"[yellow]Log path already exists in configuration:[/yellow] {abs_path}")
-                continue
+            if user_input.strip().startswith("/"):
+                handled = _handle_slash_command(user_input.strip(), analyzer_config)
+                if handled:
+                    continue
             
             app_state.turn_index += 1
             state["messages"].append({"role": "user", "content": user_input})
@@ -339,6 +332,164 @@ def _get_provider(provider_name: str, model: Optional[str]):
     except ValueError as e:
         console.print(f"[red]Error:[/red] {str(e)}")
         raise typer.Exit(1)
+
+
+def _handle_slash_command(raw_input: str, config: AnalyzerConfig) -> bool:
+    """
+    Process client-side slash commands. Returns True if the input was
+    handled (caller should `continue`), False to pass through to the LLM.
+    """
+    parts = raw_input.split(maxsplit=1)
+    cmd = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
+
+    # ── /addlog ──────────────────────────────────────────────────
+    if cmd == "/addlog":
+        if not arg:
+            console.print("[red]Usage:[/red] /addlog <file_path>")
+            return True
+        abs_path = str(Path(arg).absolute())
+        new_id = config.add_log(abs_path)
+        console.print(f"[green]Added log[/green] [bold]{new_id}[/bold] → {abs_path}")
+        if not Path(abs_path).exists():
+            console.print(f"[yellow]Warning:[/yellow] File does not exist yet: {abs_path}")
+        return True
+
+    # ── /addissue ────────────────────────────────────────────────
+    if cmd == "/addissue":
+        if not arg:
+            console.print("[red]Usage:[/red] /addissue <issue_description>")
+            return True
+        new_id = config.add_issue(arg)
+        console.print(f"[green]Added issue[/green] [bold]{new_id}[/bold] → {arg}")
+        return True
+
+    # ── /logs ────────────────────────────────────────────────────
+    if cmd == "/logs":
+        logs = config.get_logs()
+        if not logs:
+            console.print("[yellow]No log files configured.[/yellow]")
+            return True
+        table = Table(title="Configured Log Files")
+        table.add_column("ID", style="cyan", justify="center")
+        table.add_column("Path", style="white")
+        table.add_column("Exists", justify="center")
+        for lid, lpath in logs.items():
+            exists = "✓" if Path(lpath).exists() else "✗"
+            exists_style = "green" if Path(lpath).exists() else "red"
+            table.add_row(lid, lpath, f"[{exists_style}]{exists}[/{exists_style}]")
+        console.print(table)
+        return True
+
+    # ── /issues ──────────────────────────────────────────────────
+    if cmd == "/issues":
+        issues = config.get_issues()
+        if not issues:
+            console.print("[yellow]No issues configured.[/yellow]")
+            return True
+        table = Table(title="Configured Issues")
+        table.add_column("ID", style="cyan", justify="center")
+        table.add_column("Description", style="white")
+        for iid, desc in issues.items():
+            table.add_row(iid, desc)
+        console.print(table)
+        return True
+
+    # ── /rmlog ───────────────────────────────────────────────────
+    if cmd == "/rmlog":
+        if not arg:
+            console.print("[red]Usage:[/red] /rmlog <id>")
+            return True
+        if config.remove_log(arg.strip()):
+            console.print(f"[green]Removed log[/green] [bold]{arg.strip()}[/bold]")
+        else:
+            console.print(f"[red]Log ID '{arg.strip()}' not found.[/red]")
+        return True
+
+    # ── /rmissue ─────────────────────────────────────────────────
+    if cmd == "/rmissue":
+        if not arg:
+            console.print("[red]Usage:[/red] /rmissue <id>")
+            return True
+        if config.remove_issue(arg.strip()):
+            console.print(f"[green]Removed issue[/green] [bold]{arg.strip()}[/bold]")
+        else:
+            console.print(f"[red]Issue ID '{arg.strip()}' not found.[/red]")
+        return True
+
+    # ── /editlog ─────────────────────────────────────────────────
+    if cmd == "/editlog":
+        edit_parts = arg.split(maxsplit=1)
+        if len(edit_parts) < 2:
+            console.print("[red]Usage:[/red] /editlog <id> <new_path>")
+            return True
+        eid, new_path = edit_parts[0], str(Path(edit_parts[1]).absolute())
+        if config.edit_log(eid, new_path):
+            console.print(f"[green]Updated log[/green] [bold]{eid}[/bold] → {new_path}")
+        else:
+            console.print(f"[red]Log ID '{eid}' not found.[/red]")
+        return True
+
+    # ── /editissue ───────────────────────────────────────────────
+    if cmd == "/editissue":
+        edit_parts = arg.split(maxsplit=1)
+        if len(edit_parts) < 2:
+            console.print("[red]Usage:[/red] /editissue <id> <new_description>")
+            return True
+        eid, new_desc = edit_parts
+        if config.edit_issue(eid, new_desc):
+            console.print(f"[green]Updated issue[/green] [bold]{eid}[/bold] → {new_desc}")
+        else:
+            console.print(f"[red]Issue ID '{eid}' not found.[/red]")
+        return True
+
+    # ── /renameid ────────────────────────────────────────────────
+    if cmd == "/renameid":
+        rename_parts = arg.split()
+        if len(rename_parts) < 2:
+            console.print("[red]Usage:[/red] /renameid <old_id> <new_id>")
+            return True
+        ok, msg = config.rename_id(rename_parts[0], rename_parts[1])
+        style = "green" if ok else "red"
+        console.print(f"[{style}]{msg}[/{style}]")
+        return True
+
+    # ── /extractlogs ─────────────────────────────────────────────
+    if cmd == "/extractlogs":
+        _run_extract_logs(arg.strip(), Path(os.getcwd()))
+        return True
+
+    # Unknown slash command — pass through to LLM
+    return False
+
+
+def _run_extract_logs(flags: str, project_dir: Path):
+    """Run the Logbase Extraction Engine from the CLI."""
+    from ..insight.providers import InsightProviders
+    from ..insight.logs.logbase_extractor import LogbaseExtractor
+
+    empty = flags == "--empty"
+
+    console.print(f"[bold cyan]Running logbase extraction{' (empty — no LLM)' if empty else ''}...[/bold cyan]")
+
+    try:
+        insight = InsightProviders(project_dir)
+        extractor = LogbaseExtractor(project_dir, insight.graph_store)
+
+        def on_progress(current: int, total: int, method_name: str):
+            console.print(f"  [dim][{current}/{total}][/dim] Processing [bold]{method_name}()[/bold]...")
+
+        result = extractor.extract(empty=empty, on_progress=on_progress)
+
+        method_count = sum(
+            len(methods)
+            for classes in result.values()
+            for methods in classes.values()
+        )
+        console.print(f"[bold green]Done.[/bold green] Extracted {method_count} methods across {len(result)} files.")
+        console.print(f"[dim]Saved to .liteagent/logbase.json[/dim]")
+    except Exception as e:
+        console.print(f"[red]Extraction failed:[/red] {type(e).__name__}: {e}")
 
 async def _execute_graph(graph, state, verbose=False):
     current_state = state
