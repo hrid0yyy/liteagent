@@ -7,6 +7,7 @@ from .read_file_tool import create_read_file_tool
 from .read_log_lineRange_tool import create_read_log_lineRange_tool
 from .search_logs_tool import create_search_logs_tool
 from .extract_log_patterns_tool import create_extract_log_patterns_tool
+from .search_code_tool import create_search_code_tool
 
 class ToolFactory:
     @staticmethod
