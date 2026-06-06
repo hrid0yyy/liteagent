@@ -478,8 +478,10 @@ def _run_extract_logs(flags: str, project_dir: Path):
         insight = InsightProviders(project_dir)
         extractor = LogbaseExtractor(project_dir, insight.graph_store)
 
+        import sys
         def on_progress(current: int, total: int, method_name: str):
-            console.print(f"  [dim][{current}/{total}][/dim] Processing [bold]{method_name}()[/bold]...")
+            sys.stdout.write(f"\r  [{current}/{total}] method extracted...".ljust(50))
+            sys.stdout.flush()
 
         # Create the LLM describer only when descriptions are needed
         llm_describe = None if empty else create_llm_describer(
@@ -494,7 +496,7 @@ def _run_extract_logs(flags: str, project_dir: Path):
             for classes in result.values()
             for methods in classes.values()
         )
-        console.print(f"[bold green]Done.[/bold green] Extracted {method_count} methods across {len(result)} files.")
+        console.print(f"\n[bold green]Done.[/bold green] Extracted {method_count} methods across {len(result)} files.")
         console.print(f"[dim]Saved to .liteagent/logbase.json[/dim]")
     except Exception as e:
         console.print(f"[red]Extraction failed:[/red] {type(e).__name__}: {e}")

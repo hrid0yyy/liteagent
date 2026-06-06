@@ -246,8 +246,6 @@ def create_llm_describer(provider_name: str = None, model: str = None) -> Callab
         except RuntimeError:
             result = asyncio.run(provider.generate(messages))
 
-        print(f"[LLM Describer] Raw result for {method_name}: {result}")
-
         # Extract text from the provider response
         content = result.get("content", "")
         if isinstance(content, list):
