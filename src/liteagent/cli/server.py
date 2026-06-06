@@ -40,7 +40,8 @@ async def execute_tool(data: dict = Body(...)):
 def _run_extraction(empty: bool) -> Dict[str, Any]:
     """Shared extraction logic for both Inspector actions."""
     from ..insight.providers import InsightProviders
-    from ..insight.logs.logbase_extractor import LogbaseExtractor
+    from ..insight.logs.logbase_extractor import LogbaseExtractor, create_llm_describer
+    from ..core.state import app_state
 
     project_dir = Path(os.getcwd())
     progress_log: list[str] = []
@@ -52,7 +53,13 @@ def _run_extraction(empty: bool) -> Dict[str, Any]:
         def on_progress(current: int, total: int, method_name: str):
             progress_log.append(f"[{current}/{total}] Processing {method_name}()")
 
-        result = extractor.extract(empty=empty, on_progress=on_progress)
+        # Create the LLM describer only when descriptions are needed
+        llm_describe = None if empty else create_llm_describer(
+            provider_name=app_state.active_provider or None,
+            model=app_state.active_model or None,
+        )
+
+        result = extractor.extract(empty=empty, llm_describe=llm_describe, on_progress=on_progress)
 
         method_count = sum(
             len(methods)

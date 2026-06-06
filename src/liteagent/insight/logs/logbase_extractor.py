@@ -139,7 +139,10 @@ class LogbaseExtractor:
                 log_lines_str = "\n".join(item["log_lines"])
                 try:
                     description = llm_describe(mn, item["source_code"], log_lines_str)
-                except Exception:
+                except Exception as e:
+                    import traceback
+                    print(f"[LogbaseExtractor] LLM describe failed for {mn}: {e}")
+                    traceback.print_exc()
                     description = ""
 
             new_logbase.setdefault(fp, {}).setdefault(cls, {})[mn] = {
@@ -201,3 +204,56 @@ class LogbaseExtractor:
         self._hash_path.write_text(
             json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
         )
+
+
+# ── LLM describer factory ───────────────────────────────────────────
+
+def create_llm_describer(provider_name: str = None, model: str = None) -> Callable[[str, str, str], str]:
+    """
+    Create a synchronous `llm_describe(method_name, source_code, log_lines)` callable
+    that uses the configured LLM provider to generate method descriptions.
+    """
+    import asyncio
+    from ...core.config import settings
+    from ...providers.factory import LLMProviderFactory
+
+    provider_name = provider_name or settings.default_provider
+    provider = LLMProviderFactory.create_provider(provider_name, model)
+
+    def llm_describe(method_name: str, source_code: str, log_lines: str) -> str:
+        prompt = (
+            f"You are a senior software engineer. Given the following method source code and its log statements, "
+            f"write a concise 1-2 sentence description of what this method does functionally. "
+            f"Focus on business logic, not implementation details.\n\n"
+            f"Method: {method_name}\n\n"
+            f"Source code:\n```\n{source_code}\n```\n\n"
+            f"Log statements found:\n{log_lines}\n\n"
+            f"Description:"
+        )
+        messages = [{"role": "user", "content": prompt}]
+
+        # Run the async generate in a sync context
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're inside an already-running event loop (e.g. FastAPI/CLI)
+                # Use a new thread to avoid blocking
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    result = pool.submit(asyncio.run, provider.generate(messages)).result()
+            else:
+                result = loop.run_until_complete(provider.generate(messages))
+        except RuntimeError:
+            result = asyncio.run(provider.generate(messages))
+
+        print(f"[LLM Describer] Raw result for {method_name}: {result}")
+
+        # Extract text from the provider response
+        content = result.get("content", "")
+        if isinstance(content, list):
+            # Some providers return content as a list of parts
+            content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+        return content.strip()
+
+    return llm_describe
+

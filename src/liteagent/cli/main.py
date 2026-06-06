@@ -197,6 +197,8 @@ async def _run_chat(provider_name: str, model: Optional[str], resume: Optional[s
 
     provider = _get_provider(provider_name, model)
     app_state.session_id = session_id
+    app_state.active_provider = provider_name
+    app_state.active_model = getattr(provider, "model", model or "")
     app_state.turn_index = len([m for m in state["messages"] if m["role"] == "user"])
     app_state.tool_call_count = 0
     app_state.error_count = 0
@@ -466,7 +468,7 @@ def _handle_slash_command(raw_input: str, config: AnalyzerConfig) -> bool:
 def _run_extract_logs(flags: str, project_dir: Path):
     """Run the Logbase Extraction Engine from the CLI."""
     from ..insight.providers import InsightProviders
-    from ..insight.logs.logbase_extractor import LogbaseExtractor
+    from ..insight.logs.logbase_extractor import LogbaseExtractor, create_llm_describer
 
     empty = flags == "--empty"
 
@@ -479,7 +481,13 @@ def _run_extract_logs(flags: str, project_dir: Path):
         def on_progress(current: int, total: int, method_name: str):
             console.print(f"  [dim][{current}/{total}][/dim] Processing [bold]{method_name}()[/bold]...")
 
-        result = extractor.extract(empty=empty, on_progress=on_progress)
+        # Create the LLM describer only when descriptions are needed
+        llm_describe = None if empty else create_llm_describer(
+            provider_name=app_state.active_provider or None,
+            model=app_state.active_model or None,
+        )
+
+        result = extractor.extract(empty=empty, llm_describe=llm_describe, on_progress=on_progress)
 
         method_count = sum(
             len(methods)

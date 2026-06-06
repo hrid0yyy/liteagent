@@ -10,6 +10,9 @@ class AppState:
         self.turn_index: int = 0
         self.tool_call_count: int = 0
         self.error_count: int = 0
+        # Active LLM provider/model (set by CLI at startup)
+        self.active_provider: str = ""
+        self.active_model: str = ""
 
 app_state = AppState()
 
