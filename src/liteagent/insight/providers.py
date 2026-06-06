@@ -60,7 +60,7 @@ class InsightProviders:
         except ImportError:
             pass
 
-        self.log_index = LogIndex()
+        self.log_index = LogIndex(project_dir)
         self.retriever = HybridRetriever(insight_dir)
         
         # Wire up retriever reference for watchdog stale marking

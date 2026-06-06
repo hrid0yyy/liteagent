@@ -27,7 +27,21 @@ class AnalyzerConfig:
                 return json.loads(self._config_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 pass
-        return {"logs": {}, "issues": {}}
+        
+        # Create a template configuration if it doesn't exist
+        template = {
+            "logs": {
+                "exmp": "C:/path/to/your/app.log"
+            },
+            "issues": {
+                "bug1": "Sample issue description here."
+            }
+        }
+        self._config_path.write_text(
+            json.dumps(template, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return template
 
     def _save(self) -> None:
         self._config_path.write_text(

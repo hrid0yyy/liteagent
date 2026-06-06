@@ -350,7 +350,7 @@ def _handle_slash_command(raw_input: str, config: AnalyzerConfig) -> bool:
         if not arg:
             console.print("[red]Usage:[/red] /addlog <file_path>")
             return True
-        abs_path = str(Path(arg).absolute())
+        abs_path = Path(arg).absolute().as_posix()
         new_id = config.add_log(abs_path)
         console.print(f"[green]Added log[/green] [bold]{new_id}[/bold] → {abs_path}")
         if not Path(abs_path).exists():
@@ -425,7 +425,7 @@ def _handle_slash_command(raw_input: str, config: AnalyzerConfig) -> bool:
         if len(edit_parts) < 2:
             console.print("[red]Usage:[/red] /editlog <id> <new_path>")
             return True
-        eid, new_path = edit_parts[0], str(Path(edit_parts[1]).absolute())
+        eid, new_path = edit_parts[0], Path(edit_parts[1]).absolute().as_posix()
         if config.edit_log(eid, new_path):
             console.print(f"[green]Updated log[/green] [bold]{eid}[/bold] → {new_path}")
         else:

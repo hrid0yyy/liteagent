@@ -7,7 +7,8 @@ from ...core.config import settings
 class LogIndex:
     """Log search with pre-search verification and 3-stage matching."""
     
-    def __init__(self):
+    def __init__(self, project_dir: Path):
+        self.project_dir = project_dir
         self._known_log_messages: List[str] = []
 
     def set_known_log_messages(self, messages: List[str]) -> None:
@@ -91,8 +92,10 @@ class LogIndex:
                 return [{"verification_blocked": True, "message": "No logging call in the codebase matches this query. The searched term cannot appear in log files. Use force=true to search anyway."}]
 
         results = []
-        for path_str in settings.insight_log_paths:
-            log_file = Path(path_str)
+        from ...core.analyzer_config import AnalyzerConfig
+        config = AnalyzerConfig(self.project_dir)
+        for log_file_str in config.get_logs().values():
+            log_file = Path(log_file_str)
             if not log_file.exists():
                 continue
             try:
