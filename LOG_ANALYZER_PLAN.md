@@ -10,7 +10,31 @@ Pivot the existing LiteAgent into a specialized **LogAnalyzer**. The new workflo
     *   **Automated Pre-processing**: Runs automatically before `/analyze` or manually via `/extractlogs`.
     *   **LLM Descriptions**: For every method containing a log statement, an LLM generates a functional description of what that method does.
     *   **Real-time Progress Feedback**: During extraction, the terminal will show a live progress indicator (e.g., `[3/10] Generating description for process_payment()...`) so the user can track the status of LLM processing.
-    *   **Persistence**: Extracted templates and descriptions are cached in `.liteagent/logbase.json`.
+    *   **Persistence**: Extracted templates and descriptions are cached in `.liteagent/logbase.json`. The structure of this file must strictly follow this hierarchy:
+        *   Grouped by **Filepath**.
+        *   Grouped by **Class** within the file (or standalone functions).
+        *   Grouped by **Method** within the class.
+        *   Each method entry must contain:
+            *   `log_lines`: An array of the log statements found in the method.
+            *   `description`: The LLM-generated functional description of what the method does.
+            *   `line_range`: The starting and ending line numbers of the method in the code file.
+            *   **Sample JSON Structure**:
+                ```json
+                {
+                  "src/payment/gateway.py": {
+                    "PaymentProcessor": {
+                      "process_payment": {
+                        "log_lines": [
+                          "logger.info('Processing payment for user %s')",
+                          "logger.error('Payment failed due to invalid token')"
+                        ],
+                        "description": "Handles the core payment processing logic and error states.",
+                        "line_range": [42, 85]
+                      }
+                    }
+                  }
+                }
+                ```
     *   **Incremental Efficiency**: Uses method-level hashing to track changes. If a method is unmodified, it skips the LLM call and uses the cached description, significantly reducing latency and token costs.
 4.  **Automated Log Ingestion**: Utilize the existing `LogDiscoverer` and `LogParser` to automatically parse and index the configured logs into SQLite FTS5.
 5.  **Issue Analysis**: Given the configured issue and the enriched logbase context, the agent automatically formulates queries to search the indexed logs for relevant errors, anomalies, or stack traces when `/analyze` is called.
@@ -32,8 +56,10 @@ The chat interface will intercept these commands locally to update the persisten
         *   `--empty`: Performs extraction and saves to `logbase.json` **without calling the LLM**. The description fields will be left empty, allowing for instant extraction or manual developer input.
     *   **Standard Behavior**: Without the flag, it scans for changes and uses the LLM to generate/update descriptions for modified code. (Also runs automatically before `/analyze`).
 *   **Tool Inspector Integration**:
-    *   The `extract_logs` functionality will be registered as a system-level action in the **Tool Inspector** web UI (`liteagent chat -i`).
-    *   Developers can trigger both full and `--empty` extractions directly from the Tool Inspector.
+    *   The extraction functionality will be registered as system-level actions in the **Tool Inspector** web UI (`liteagent chat -i`).
+    *   There will be two specific options available, **neither of which take any parameters**:
+        1.  `extract-log-with-description`: Performs the full extraction using the LLM to generate descriptions.
+        2.  `extract-log-empty`: Performs the fast extraction, leaving descriptions empty (bypassing the LLM).
     *   The Inspector UI will show the same real-time progress feedback as the CLI.
 
 ## AI Analysis Commands
